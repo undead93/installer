@@ -1,0 +1,130 @@
+<template>
+  <style>
+    #root {
+      position: absolute;
+      inset: 0;
+      color: #f4eee3;
+    }
+    #craft-chapter {
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 250px;
+      text-align: center;
+    }
+    #craft-num {
+      font-family: "Playfair Display", serif;
+      font-size: 120px;
+      line-height: 1;
+      color: #c9a46a;
+    }
+    #craft-title {
+      margin-top: 14px;
+      font-family: "Playfair Display", serif;
+      font-style: italic;
+      font-size: 96px;
+    }
+    .craft-word {
+      position: absolute;
+      left: 72px;
+      right: 72px;
+      top: 230px;
+    }
+    .craft-count {
+      font-family: "Inter", sans-serif;
+      font-weight: 700;
+      font-size: 28px;
+      letter-spacing: 0.4em;
+      color: #c9a46a;
+    }
+    .craft-text {
+      margin-top: 8px;
+      font-family: "Playfair Display", serif;
+      font-style: italic;
+      font-size: 150px;
+      line-height: 1.05;
+    }
+    .craft-text span {
+      display: inline-block;
+    }
+  </style>
+  <div id="root" data-composition-id="craft" data-width="1080" data-height="1920">
+    <div id="craft-chapter" class="clip" data-start="0" data-duration="2.6">
+      <div id="craft-chapter-inner">
+        <div id="craft-num">II</div>
+        <div id="craft-title">The craft</div>
+      </div>
+    </div>
+
+    <div id="craft-w1" class="craft-word clip" data-start="2.6" data-duration="3.0">
+      <div id="craft-w1-inner">
+        <div class="craft-count">01 — 04</div>
+        <div class="craft-text" id="craft-w1-text">Precision.</div>
+      </div>
+    </div>
+    <div id="craft-w2" class="craft-word clip" data-start="5.6" data-duration="2.6">
+      <div id="craft-w2-inner">
+        <div class="craft-count">02 — 04</div>
+        <div class="craft-text" id="craft-w2-text">Patience.</div>
+      </div>
+    </div>
+    <div id="craft-w3" class="craft-word clip" data-start="8.2" data-duration="2.2">
+      <div id="craft-w3-inner">
+        <div class="craft-count">03 — 04</div>
+        <div class="craft-text" id="craft-w3-text">Detail.</div>
+      </div>
+    </div>
+    <div id="craft-w4" class="craft-word clip" data-start="10.4" data-duration="3.0">
+      <div id="craft-w4-inner">
+        <div class="craft-count">04 — 04</div>
+        <div class="craft-text" id="craft-w4-text">Finish.</div>
+      </div>
+    </div>
+  </div>
+  <script>
+    const tl = gsap.timeline({ paused: true });
+
+    // Chapter card
+    tl.fromTo("#craft-num", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.6, ease: "expo.out" }, 0.15);
+    tl.fromTo("#craft-title", { opacity: 0, filter: "blur(8px)" }, { opacity: 1, filter: "blur(0px)", duration: 0.2, ease: "power4.out" }, 0.4);
+    tl.to("#craft-chapter-inner", { opacity: 0, filter: "blur(8px)", duration: 0.18, ease: "power2.in" }, 2.38);
+
+    // Split each word into letters once, at init
+    ["#craft-w1-text", "#craft-w4-text"].forEach((sel) => {
+      const el = document.querySelector(sel);
+      const txt = el.textContent;
+      el.textContent = "";
+      [...txt].forEach((ch) => {
+        const s = document.createElement("span");
+        s.textContent = ch;
+        el.appendChild(s);
+      });
+    });
+
+    // 01 Precision: letter by letter
+    tl.fromTo("#craft-w1 .craft-count", { opacity: 0 }, { opacity: 1, duration: 0.25 }, 2.6);
+    document.querySelectorAll("#craft-w1-text span").forEach((s, i) => {
+      tl.fromTo(s, { opacity: 0.0, filter: "blur(5px)" }, { opacity: 1, filter: "blur(0px)", duration: 0.2, ease: "power3.out" }, 2.62 + i * 0.045);
+    });
+    tl.to("#craft-w1-inner", { opacity: 0, filter: "blur(8px)", duration: 0.15, ease: "power2.in" }, 5.42);
+
+    // 02 Patience: the whole line blurs in
+    tl.fromTo("#craft-w2 .craft-count", { opacity: 0 }, { opacity: 1, duration: 0.25 }, 5.6);
+    tl.fromTo("#craft-w2-text", { opacity: 0, filter: "blur(10px)" }, { opacity: 1, filter: "blur(0px)", duration: 0.45, ease: "power2.out" }, 5.62);
+    tl.to("#craft-w2-inner", { opacity: 0, filter: "blur(8px)", duration: 0.15, ease: "power2.in" }, 8.02);
+
+    // 03 Detail: grey to ink
+    tl.fromTo("#craft-w3 .craft-count", { opacity: 0 }, { opacity: 1, duration: 0.25 }, 8.2);
+    tl.fromTo("#craft-w3-text", { opacity: 0, color: "#6f695f" }, { opacity: 1, color: "#f4eee3", duration: 0.35, ease: "power2.out" }, 8.22);
+    tl.to("#craft-w3-inner", { opacity: 0, filter: "blur(8px)", duration: 0.15, ease: "power2.in" }, 10.22);
+
+    // 04 Finish: letters rise in, gold
+    tl.fromTo("#craft-w4 .craft-count", { opacity: 0 }, { opacity: 1, duration: 0.25 }, 10.4);
+    document.querySelectorAll("#craft-w4-text span").forEach((s, i) => {
+      tl.fromTo(s, { opacity: 0, y: 40, color: "#c9a46a" }, { opacity: 1, y: 0, color: "#f4eee3", duration: 0.5, ease: "expo.out" }, 10.42 + i * 0.05);
+    });
+    tl.to("#craft-w4-inner", { opacity: 0, filter: "blur(10px)", duration: 0.2, ease: "power2.in" }, 13.15);
+
+    window.__timelines["craft"] = tl;
+  </script>
+</template>

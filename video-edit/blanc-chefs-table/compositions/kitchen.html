@@ -1,0 +1,71 @@
+<template>
+  <style>
+    #root {
+      position: absolute;
+      inset: 0;
+      color: #f4eee3;
+    }
+    #kitchen-block {
+      position: absolute;
+      left: 72px;
+      right: 72px;
+      top: 1010px;
+      isolation: isolate;
+    }
+    #kitchen-block::before {
+      content: "";
+      position: absolute;
+      inset: -120px -72px -120px -72px;
+      z-index: -1;
+      background: radial-gradient(ellipse at 35% 50%, rgba(0, 0, 0, 0.62) 0%, rgba(0, 0, 0, 0.38) 45%, rgba(0, 0, 0, 0) 72%);
+    }
+    #kitchen-label {
+      display: flex;
+      align-items: center;
+      gap: 22px;
+      font-family: "Inter", sans-serif;
+      font-weight: 700;
+      font-size: 28px;
+      letter-spacing: 0.42em;
+      color: #c9a46a;
+    }
+    #kitchen-rule {
+      width: 90px;
+      height: 2px;
+      background: #c9a46a;
+      transform-origin: 0 50%;
+    }
+    #kitchen-line {
+      margin-top: 26px;
+      font-family: "Playfair Display", serif;
+      font-style: italic;
+      font-size: 78px;
+      line-height: 1.12;
+    }
+    #kitchen-line span {
+      display: inline-block;
+      margin-right: 0.22em;
+    }
+  </style>
+  <div id="root" data-composition-id="kitchen" data-width="1080" data-height="1920">
+    <div id="kitchen-block" class="clip" data-start="0" data-duration="4.5">
+      <div id="kitchen-inner">
+        <div id="kitchen-label"><div id="kitchen-rule"></div><span>OPEN KITCHEN</span></div>
+        <div id="kitchen-line">
+          <span class="kw">every</span><span class="kw">plate,</span><br /><span class="kw">made</span><span class="kw">before</span><span class="kw">your</span><span class="kw">eyes</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script>
+    const tl = gsap.timeline({ paused: true });
+    tl.fromTo("#kitchen-rule", { scaleX: 0 }, { scaleX: 1, duration: 0.6, ease: "expo.out" }, 0.0);
+    tl.fromTo("#kitchen-label span", { opacity: 0 }, { opacity: 1, duration: 0.3, ease: "power2.out" }, 0.1);
+    // Words turn from grey to ink, no movement
+    document.querySelectorAll("#kitchen-line .kw").forEach((el, i) => {
+      tl.fromTo(el, { opacity: 0, color: "#7d776d" }, { opacity: 1, color: "#f4eee3", duration: 0.28, ease: "power2.out" }, 0.3 + i * 0.09);
+    });
+    tl.to("#kitchen-inner", { opacity: 0, filter: "blur(8px)", duration: 0.2, ease: "power2.in" }, 4.2);
+    window.__timelines["kitchen"] = tl;
+  </script>
+</template>

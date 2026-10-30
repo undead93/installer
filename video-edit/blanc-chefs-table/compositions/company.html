@@ -1,0 +1,41 @@
+<template>
+  <style>
+    #root {
+      position: absolute;
+      inset: 0;
+      color: #f4eee3;
+    }
+    #company-block {
+      position: absolute;
+      left: 72px;
+      right: 72px;
+      top: 1060px;
+      font-family: "Playfair Display", serif;
+      font-style: italic;
+      font-size: 96px;
+      line-height: 1.12;
+    }
+    #company-block span {
+      display: inline-block;
+      margin-right: 0.2em;
+    }
+    #company-gold {
+      color: #c9a46a;
+    }
+  </style>
+  <div id="root" data-composition-id="company" data-width="1080" data-height="1920">
+    <div id="company-block" class="clip" data-start="0" data-duration="2.6">
+      <div id="company-inner">
+        <span class="cw">Good</span><span class="cw">food,</span><br /><span class="cw">better</span><span class="cw" id="company-gold">company.</span>
+      </div>
+    </div>
+  </div>
+  <script>
+    const tl = gsap.timeline({ paused: true });
+    document.querySelectorAll("#company-inner .cw").forEach((el, i) => {
+      tl.fromTo(el, { opacity: 0, filter: "blur(6px)" }, { opacity: 1, filter: "blur(0px)", duration: 0.13, ease: "power3.out" }, 0.15 + i * 0.1);
+    });
+    tl.to("#company-inner", { opacity: 0, duration: 0.2, ease: "power2.in" }, 2.35);
+    window.__timelines["company"] = tl;
+  </script>
+</template>

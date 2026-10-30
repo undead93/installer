@@ -1,0 +1,6 @@
+# Footage, photo and room tone stay local (large / personal media)
+assets/video/
+assets/img/
+assets/audio/
+.hyperframes/
+*.mp4

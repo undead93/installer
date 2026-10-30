@@ -1,0 +1,79 @@
+<template>
+  <style>
+    #root {
+      position: absolute;
+      inset: 0;
+      color: #f4eee3;
+    }
+    #plate-frame {
+      position: absolute;
+      left: 150px;
+      top: 1150px;
+      width: 780px;
+      height: 440px;
+    }
+    .plate-corner {
+      position: absolute;
+      width: 70px;
+      height: 70px;
+      border-color: #c9a46a;
+      border-style: solid;
+      border-width: 0;
+    }
+    #plate-c1 { left: 0; top: 0; border-left-width: 3px; border-top-width: 3px; }
+    #plate-c2 { right: 0; top: 0; border-right-width: 3px; border-top-width: 3px; }
+    #plate-c3 { left: 0; bottom: 0; border-left-width: 3px; border-bottom-width: 3px; }
+    #plate-c4 { right: 0; bottom: 0; border-right-width: 3px; border-bottom-width: 3px; }
+    #plate-text {
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 300px;
+      text-align: center;
+    }
+    #plate-line {
+      font-family: "Playfair Display", serif;
+      font-style: italic;
+      font-size: 130px;
+      line-height: 1;
+    }
+    #plate-sub {
+      margin-top: 26px;
+      font-family: "Inter", sans-serif;
+      font-weight: 700;
+      font-size: 28px;
+      letter-spacing: 0.45em;
+      padding-left: 0.45em;
+      color: #c9a46a;
+    }
+  </style>
+  <div id="root" data-composition-id="plate" data-width="1080" data-height="1920">
+    <div id="plate-frame" class="clip" data-start="0" data-duration="3.4" data-layout-ignore>
+      <div id="plate-frame-inner" style="position: absolute; inset: 0">
+        <div id="plate-c1" class="plate-corner"></div>
+        <div id="plate-c2" class="plate-corner"></div>
+        <div id="plate-c3" class="plate-corner"></div>
+        <div id="plate-c4" class="plate-corner"></div>
+      </div>
+    </div>
+    <div id="plate-text" class="clip" data-start="0" data-duration="3.4">
+      <div id="plate-text-inner">
+        <div id="plate-line">Served.</div>
+        <div id="plate-sub">IN THE SPOTLIGHT</div>
+      </div>
+    </div>
+  </div>
+  <script>
+    const tl = gsap.timeline({ paused: true });
+    // Corners close in on the plate like a focus lock
+    tl.fromTo("#plate-c1", { x: -60, y: -60, opacity: 0 }, { x: 0, y: 0, opacity: 1, duration: 0.6, ease: "expo.out" }, 0.05);
+    tl.fromTo("#plate-c2", { x: 60, y: -60, opacity: 0 }, { x: 0, y: 0, opacity: 1, duration: 0.6, ease: "expo.out" }, 0.05);
+    tl.fromTo("#plate-c3", { x: -60, y: 60, opacity: 0 }, { x: 0, y: 0, opacity: 1, duration: 0.6, ease: "expo.out" }, 0.05);
+    tl.fromTo("#plate-c4", { x: 60, y: 60, opacity: 0 }, { x: 0, y: 0, opacity: 1, duration: 0.6, ease: "expo.out" }, 0.05);
+    tl.fromTo("#plate-line", { opacity: 0, filter: "blur(8px)" }, { opacity: 1, filter: "blur(0px)", duration: 0.2, ease: "power4.out" }, 0.3);
+    tl.fromTo("#plate-sub", { opacity: 0 }, { opacity: 1, duration: 0.3, ease: "power2.out" }, 0.55);
+    tl.to("#plate-frame-inner", { opacity: 0, duration: 0.2, ease: "power2.in" }, 3.15);
+    tl.to("#plate-text-inner", { opacity: 0, filter: "blur(8px)", duration: 0.18, ease: "power2.in" }, 3.18);
+    window.__timelines["plate"] = tl;
+  </script>
+</template>

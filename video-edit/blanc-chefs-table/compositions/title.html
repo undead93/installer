@@ -1,0 +1,83 @@
+<template>
+  <style>
+    #root {
+      position: absolute;
+      inset: 0;
+      color: #f4eee3;
+    }
+    #title-block {
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 940px;
+      text-align: center;
+    }
+    #title-kicker {
+      font-family: "Inter", sans-serif;
+      font-weight: 700;
+      font-size: 28px;
+      letter-spacing: 0.55em;
+      padding-left: 0.55em;
+      color: #f4eee3;
+    }
+    #title-word {
+      margin-top: 18px;
+      font-family: "Playfair Display", serif;
+      font-weight: 400;
+      font-size: 200px;
+      line-height: 1;
+      letter-spacing: 0.1em;
+      padding-left: 0.1em;
+    }
+    #title-word span {
+      display: inline-block;
+    }
+    #title-rule {
+      margin: 34px auto 0;
+      width: 420px;
+      height: 2px;
+      background: #c9a46a;
+      transform-origin: 50% 50%;
+    }
+    #title-sub {
+      margin-top: 28px;
+      font-family: "Playfair Display", serif;
+      font-style: italic;
+      font-size: 60px;
+      color: #e9dcc4;
+    }
+  </style>
+  <div id="root" data-composition-id="title" data-width="1080" data-height="1920">
+    <div id="title-block" class="clip" data-start="0" data-duration="3.2">
+      <div id="title-inner">
+      <div id="title-kicker">AN EVENING AT</div>
+      <div id="title-word">BLANC</div>
+      <div id="title-rule"></div>
+      <div id="title-sub">a seat at the chef’s table</div>
+      </div>
+    </div>
+  </div>
+  <script>
+    const tl = gsap.timeline({ paused: true });
+    // Split the venue name into letters once, at init
+    const venue = ((window.__hyperframes && window.__hyperframes.getVariables().venue) || "BLANC").toUpperCase();
+    const word = document.querySelector("#title-word");
+    word.textContent = "";
+    [...venue].forEach((ch) => {
+      const span = document.createElement("span");
+      span.className = "title-letter";
+      span.textContent = ch;
+      word.appendChild(span);
+    });
+    // Frame 0 already carries the name (it is the thumbnail)
+    tl.fromTo("#title-kicker", { opacity: 0.6, filter: "blur(8px)" }, { opacity: 1, filter: "blur(0px)", duration: 0.2, ease: "power4.out" }, 0.0);
+    document.querySelectorAll("#title-word .title-letter").forEach((el, i) => {
+      tl.fromTo(el, { opacity: 0.6, filter: "blur(4px)" }, { opacity: 1, filter: "blur(0px)", duration: 0.3, ease: "power3.out" }, 0.0 + i * 0.1);
+    });
+    tl.fromTo("#title-rule", { scaleX: 0 }, { scaleX: 1, duration: 0.7, ease: "expo.out" }, 0.45);
+    tl.fromTo("#title-sub", { opacity: 0, filter: "blur(8px)" }, { opacity: 1, filter: "blur(0px)", duration: 0.2, ease: "power4.out" }, 0.75);
+    // Leave with the whip
+    tl.to("#title-inner", { opacity: 0, filter: "blur(10px)", duration: 0.18, ease: "power2.in" }, 2.98);
+    window.__timelines["title"] = tl;
+  </script>
+</template>

@@ -1,0 +1,62 @@
+<template>
+  <style>
+    #root {
+      position: absolute;
+      inset: 0;
+      color: #f4eee3;
+    }
+    #outro-block {
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 640px;
+      text-align: center;
+    }
+    #outro-name {
+      font-family: "Playfair Display", serif;
+      font-size: 170px;
+      line-height: 1;
+      letter-spacing: 0.12em;
+      padding-left: 0.12em;
+    }
+    #outro-rule {
+      margin: 34px auto 0;
+      width: 360px;
+      height: 2px;
+      background: #c9a46a;
+    }
+    #outro-sub {
+      margin-top: 30px;
+      font-family: "Inter", sans-serif;
+      font-weight: 700;
+      font-size: 28px;
+      letter-spacing: 0.5em;
+      padding-left: 0.5em;
+      color: #c9a46a;
+    }
+    #outro-line {
+      margin-top: 46px;
+      font-family: "Playfair Display", serif;
+      font-style: italic;
+      font-size: 76px;
+    }
+  </style>
+  <div id="root" data-composition-id="outro" data-width="1080" data-height="1920">
+    <div id="outro-block" class="clip" data-start="0" data-duration="4.4">
+      <div id="outro-inner">
+        <div id="outro-name" data-var-text="venue">BLANC</div>
+        <div id="outro-rule"></div>
+        <div id="outro-sub">CHEF’S TABLE</div>
+        <div id="outro-line">until next time.</div>
+      </div>
+    </div>
+  </div>
+  <script>
+    const tl = gsap.timeline({ paused: true });
+    tl.fromTo("#outro-name", { opacity: 0, filter: "blur(10px)", scale: 1.12 }, { opacity: 1, filter: "blur(0px)", scale: 1, duration: 1.1, ease: "expo.out" }, 0.25);
+    tl.fromTo("#outro-rule", { scaleX: 0 }, { scaleX: 1, duration: 0.8, ease: "expo.out" }, 0.7);
+    tl.fromTo("#outro-sub", { opacity: 0 }, { opacity: 1, duration: 0.4, ease: "power2.out" }, 0.9);
+    tl.fromTo("#outro-line", { opacity: 0, color: "#7d776d" }, { opacity: 1, color: "#f4eee3", duration: 0.5, ease: "power2.out" }, 1.3);
+    window.__timelines["outro"] = tl;
+  </script>
+</template>

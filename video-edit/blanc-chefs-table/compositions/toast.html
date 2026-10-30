@@ -1,0 +1,43 @@
+<template>
+  <style>
+    #root {
+      position: absolute;
+      inset: 0;
+      color: #f4eee3;
+    }
+    #toast-block {
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 250px;
+      text-align: center;
+    }
+    #toast-num {
+      font-family: "Playfair Display", serif;
+      font-size: 120px;
+      line-height: 1;
+      color: #c9a46a;
+    }
+    #toast-line {
+      margin-top: 14px;
+      font-family: "Playfair Display", serif;
+      font-style: italic;
+      font-size: 96px;
+    }
+  </style>
+  <div id="root" data-composition-id="toast" data-width="1080" data-height="1920">
+    <div id="toast-block" class="clip" data-start="0" data-duration="3.2">
+      <div id="toast-inner">
+        <div id="toast-num">I</div>
+        <div id="toast-line">First, a toast.</div>
+      </div>
+    </div>
+  </div>
+  <script>
+    const tl = gsap.timeline({ paused: true });
+    tl.fromTo("#toast-num", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.6, ease: "expo.out" }, 0.0);
+    tl.fromTo("#toast-line", { opacity: 0, filter: "blur(8px)" }, { opacity: 1, filter: "blur(0px)", duration: 0.2, ease: "power4.out" }, 0.25);
+    tl.to("#toast-inner", { opacity: 0, filter: "blur(8px)", duration: 0.18, ease: "power2.in" }, 2.95);
+    window.__timelines["toast"] = tl;
+  </script>
+</template>
