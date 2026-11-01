@@ -115,8 +115,17 @@ export class WhatsApp {
     const text = content?.conversation || content?.extendedTextMessage?.text;
     if (!text) return;
 
-    // Siapa penghantar? (WhatsApp baru guna LID, jadi semak juga remoteJidAlt)
+    // Siapa penghantar? WhatsApp baru guna LID (ID rahsia @lid) instead of nombor telefon,
+    // jadi semak remoteJidAlt dan tukar LID -> nombor guna jadual LID Baileys.
     const chatUsers = [userOf(jid), userOf(m.key.remoteJidAlt)].filter(Boolean);
+    if (jid.endsWith('@lid')) {
+      try {
+        const pn = await this.sock.signalRepository?.lidMapping?.getPNForLID(jid);
+        if (pn) chatUsers.push(userOf(pn));
+      } catch {
+        /* abaikan */
+      }
+    }
     const self = this.selfUsers();
     const selfChat = chatUsers.some((u) => self.includes(u));
 
@@ -126,7 +135,14 @@ export class WhatsApp {
     } else {
       allowed = chatUsers.some((u) => this.ownerNumbers.includes(u));
     }
-    if (!allowed) return;
+
+    const from = m.key.fromMe ? 'saya sendiri' : chatUsers.join(' / ');
+    console.log(`📩 Mesej dari ${from}: "${text.slice(0, 40)}" → ${allowed ? 'DIPROSES' : 'DIABAIKAN (bukan owner)'}`);
+    if (!allowed) {
+      if (!m.key.fromMe)
+        console.log(`   Kalau ini nombor anda, letak dalam .env: OWNER_NUMBERS=${chatUsers.find((u) => u.startsWith('6')) ?? chatUsers[0]}`);
+      return;
+    }
 
     const reply = await this.onCommand(text, { jid, selfChat });
     if (reply) await this.sendTo(jid, reply);
