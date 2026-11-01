@@ -1,0 +1,19 @@
+{
+  "name": "paxg-whatsapp-bot",
+  "version": "1.0.0",
+  "description": "Bot alert WhatsApp untuk Bybit PAXGUSDT futures (alert ±100 pip + trend EMA 15m/30m/1H/4H)",
+  "type": "module",
+  "main": "src/index.js",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "7.0.0-rc14",
+    "pino": "^9.6.0",
+    "qrcode-terminal": "^0.12.0"
+  }
+}
