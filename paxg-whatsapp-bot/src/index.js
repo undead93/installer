@@ -1,3 +1,4 @@
+import './quiet-logs.js';
 import { config } from './config.js';
 import { getPrice } from './bybit.js';
 import { getTrends, formatTrends } from './trend.js';
