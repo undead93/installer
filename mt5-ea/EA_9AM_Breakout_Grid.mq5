@@ -39,7 +39,7 @@ input int           ServerGMTOffset   = 2;         // GMT offset server broker (
 input double        TriggerPips       = 100;       // Jarak pip dari harga rujukan untuk trigger
 
 input group "=== EMA (Rujukan Arah) ==="
-input ENUM_TIMEFRAMES EMA_TF          = PERIOD_M15;         // Timeframe EMA
+input ENUM_TIMEFRAMES EMA_TF          = PERIOD_H1;          // Timeframe EMA
 input int             EMA_Fast        = 7;                  // EMA laju (kuning)
 input int             EMA_Mid         = 14;                 // EMA sederhana (biru)
 input int             EMA_Slow        = 28;                 // EMA perlahan (ungu)
@@ -53,7 +53,7 @@ input double        LotMultiplier     = 1.0;       // Pengganda lot setiap layer
 input double        TPPips            = 20;        // TP (pip) dari harga purata
 input double        LayerStepPips     = 20;        // Jarak layer (pip)
 input int           MaxLayers         = 10;        // Maksimum layer (termasuk entry pertama)
-input int           MaxCyclesPerDay   = 1;         // Berapa kali basket boleh dibuka setiap sesi 9AM
+input int           MaxCyclesPerDay   = 1;         // Berapa kali entry baru sehari (setiap sesi 9AM)
 
 input group "=== Risiko ==="
 input double        MaxDrawdownPercent = 0;        // Cut loss basket jika floating rugi >= % balance (0 = off)
