@@ -14,6 +14,8 @@
 //|   4. Tunggu harga patah balik melepasi harga buka:               |
 //|        BULLISH -> BUY bila harga BAWAH harga buka                |
 //|        BEARISH -> SELL bila harga ATAS harga buka                |
+//|   0. Langkau hari jika candle semalam lemah (body < 200 pip &    |
+//|      shadow panjang)                                             |
 //|   5. SATU entry sehari. TP 20 pip. Layer setiap 20 pip,          |
 //|      TP semua posisi = harga purata +/- 20 pip                   |
 //+------------------------------------------------------------------+
@@ -64,6 +66,11 @@ input bool           UseSweepRule     = true;      // Kira sapuan PDH/PDL (rejec
 input bool           RequirePullback  = true;      // Tunggu harga lepas harga buka (beli murah / jual mahal)
 input double         MinPullbackPips  = 0;         // Jarak minimum dari harga buka (pip)
 
+input group "=== Tapis Candle Semalam ==="
+input bool           UsePrevBodyFilter = true;     // Langkau hari jika candle semalam lemah
+input double         MinPrevBodyPips   = 200;      // Body semalam minimum (pip)
+input double         ShadowBodyRatio   = 1.0;      // Langkau hanya jika shadow >= X kali body (0 = abaikan shadow)
+
 input group "=== EMA (Pengesahan) ==="
 input bool            RequireEMA      = true;               // Wajib EMA sama arah
 input ENUM_TIMEFRAMES EMA_TF          = PERIOD_H1;          // Timeframe EMA
@@ -102,6 +109,8 @@ bool     g_rangeOK  = false;
 bool     g_openOK   = false;
 double   g_pdh      = 0;
 double   g_pdl      = 0;
+double   g_pdo      = 0;      // open candle semalam
+double   g_pdc      = 0;      // close candle semalam
 double   g_open     = 0;
 string   g_status   = "";
 
@@ -254,10 +263,14 @@ void LoadRange()
      {
       double h = iHigh(_Symbol, PERIOD_D1, 1);
       double l = iLow(_Symbol, PERIOD_D1, 1);
-      if(h <= 0 || l <= 0)
+      double o = iOpen(_Symbol, PERIOD_D1, 1);
+      double c = iClose(_Symbol, PERIOD_D1, 1);
+      if(h <= 0 || l <= 0 || o <= 0 || c <= 0)
          return;
       g_pdh = h;
       g_pdl = l;
+      g_pdo = o;
+      g_pdc = c;
      }
    else
      {
@@ -278,9 +291,12 @@ void LoadRange()
          return;
       g_pdh = iHigh(_Symbol, PERIOD_M1, hi);
       g_pdl = iLow(_Symbol, PERIOD_M1, lo);
+      g_pdo = iOpen(_Symbol, PERIOD_M1, shStart);
+      g_pdc = iClose(_Symbol, PERIOD_M1, shEnd);
      }
    g_rangeOK = true;
-   PrintFormat("PDH = %s | PDL = %s", DoubleToString(g_pdh, _Digits), DoubleToString(g_pdl, _Digits));
+   PrintFormat("PDH = %s | PDL = %s | Body semalam %.0f pip, shadow %.0f pip",
+               DoubleToString(g_pdh, _Digits), DoubleToString(g_pdl, _Digits), PrevBodyPips(), PrevShadowPips());
    DrawLevelsNow();
   }
 
@@ -298,6 +314,23 @@ void LoadOpen()
    PrintFormat("Harga buka hari = %s (%s MYT)", DoubleToString(g_open, _Digits),
                TimeToString(ServerToMYT(iTime(_Symbol, PERIOD_M1, sh)), TIME_DATE | TIME_MINUTES));
    DrawLevelsNow();
+  }
+
+//--- saiz body & jumlah shadow (atas + bawah) candle semalam, dalam pip
+double PrevBodyPips()   { return MathAbs(g_pdc - g_pdo) / Pip(); }
+double PrevShadowPips() { return ((g_pdh - g_pdl) - MathAbs(g_pdc - g_pdo)) / Pip(); }
+
+//--- true = candle semalam lemah (body kecil, shadow panjang) -> langkau hari ini
+bool PrevDayWeak()
+  {
+   if(!UsePrevBodyFilter || !g_rangeOK)
+      return false;
+   double body = PrevBodyPips();
+   if(body >= MinPrevBodyPips)
+      return false;
+   if(ShadowBodyRatio <= 0)
+      return true;
+   return (PrevShadowPips() >= body * ShadowBodyRatio);
   }
 
 //--- high / low "hari ini" untuk semak sapuan PDH/PDL
@@ -639,6 +672,12 @@ void TryEntry()
       g_status = "Menunggu data PDH/PDL";
       return;
      }
+   if(PrevDayWeak())
+     {
+      g_status = StringFormat("Candle semalam lemah (body %.0f pip, shadow %.0f pip) - tiada entry hari ini",
+                              PrevBodyPips(), PrevShadowPips());
+      return;
+     }
    if(RequirePullback && !g_openOK)
      {
       g_status = "Menunggu harga buka hari";
@@ -741,6 +780,9 @@ void Dashboard()
    txt += StringFormat("Hari     : bermula %s MYT\n", TimeToString(g_dayKey, TIME_DATE | TIME_MINUTES));
    txt += StringFormat("PDH      : %s\n", g_rangeOK ? DoubleToString(g_pdh, _Digits) : "-");
    txt += StringFormat("PDL      : %s\n", g_rangeOK ? DoubleToString(g_pdl, _Digits) : "-");
+   if(g_rangeOK)
+      txt += StringFormat("Semalam  : body %.0f pip | shadow %.0f pip -> %s\n", PrevBodyPips(), PrevShadowPips(),
+                          PrevDayWeak() ? "LEMAH (langkau hari ini)" : "OK");
    txt += StringFormat("Buka     : %s\n", g_openOK ? DoubleToString(g_open, _Digits) : "menunggu...");
    txt += StringFormat("Bias     : %s (%s)\n", bias > 0 ? "BULLISH" : (bias < 0 ? "BEARISH" : "TIADA"), why);
    txt += StringFormat("EMA%d/%d/%d : %s / %s / %s -> %s\n", EMA_Fast, EMA_Mid, EMA_Slow,
