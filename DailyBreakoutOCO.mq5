@@ -18,7 +18,7 @@ input double InpLots           = 0.5;      // Lot size
 input double InpMinRangePips   = 800;      // Saiz minimum candle daily (pip)
 input int    InpPointsPerPip   = 10;       // 1 pip = berapa point (10 utk XAUUSD 2 digit / forex 5 digit)
 input double InpStopLossPips   = 0;        // Stop Loss (pip), 0 = tiada
-input double InpTakeProfitPips = 0;        // Take Profit (pip), 0 = tiada
+input double InpTakeProfitPips = 20;       // Take Profit (pip), 0 = tiada
 input ulong  InpMagic          = 20261101; // Magic number
 input int    InpSlippage       = 30;       // Slippage (point)
 
