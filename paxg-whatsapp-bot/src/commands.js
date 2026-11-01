@@ -28,7 +28,7 @@ export function helpText(cfg) {
     '*padam semua* — padam semua alert aktif',
     '*sejarah padam* — kosongkan sejarah alert',
     '*trend* — trend 15m / 30m / 1H / 4H + EMA',
-    '*harga* — harga semasa',
+    '*harga* — harga semasa + alert aktif + trend',
     '*menu* — papar menu ini',
     '',
     `ℹ️ 1 pip = ${cfg.pipSize} → ${cfg.defaultPips} pip = ${(cfg.defaultPips * cfg.pipSize).toFixed(2)} USDT`,
@@ -144,13 +144,27 @@ export async function handleCommand(text, { store, cfg, getPrice, getTrends }) {
     case 'harga':
     case 'price':
     case 'p': {
-      const p = await getPrice();
+      // Harga + alert aktif (jarak ke sasaran) + trend, dalam satu mesej
+      const [p, trends] = await Promise.all([getPrice(), getTrends().catch(() => null)]);
       const sign = p.change24hPct >= 0 ? '+' : '';
-      return [
-        `💰 *${cfg.symbol}* (Bybit Futures)`,
+      const pipsTo = (target) => Math.abs(target - p.last) / cfg.pipSize;
+      const lines = [
+        `💰 *${cfg.symbol}* (Bybit Futures) — ${f.time(Date.now())}`,
         `Last: *${f.price(p.last)}*   Mark: ${f.price(p.mark)}`,
         `24j: H ${f.price(p.high24h)} / L ${f.price(p.low24h)} (${sign}${p.change24hPct.toFixed(2)}%)`,
-      ].join('\n');
+        '',
+      ];
+      const active = store.active();
+      lines.push(`🔔 *Alert aktif: ${active.length}*`);
+      if (!active.length) lines.push('_(tiada — taip "set 2650")_');
+      for (const a of active) {
+        lines.push(
+          `*#${a.id}* ${f.price(a.base)} ±${a.pips} pip${a.repeat ? ' 🔁' : ''}`,
+          `   ⬆️ ${f.price(a.upper)} (lagi ${pipsTo(a.upper).toFixed(0)} pip)  |  ⬇️ ${f.price(a.lower)} (lagi ${pipsTo(a.lower).toFixed(0)} pip)`,
+        );
+      }
+      lines.push('', '📊 *Trend:*', trends ? formatTrends(trends) : '⚠️ gagal ambil data trend');
+      return lines.join('\n');
     }
 
     case 'trend':

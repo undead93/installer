@@ -106,7 +106,14 @@ test('arahan WhatsApp', async () => {
   assert.match(await handleCommand('padam 2', deps), /dipadam/);
   assert.match(await handleCommand('padam 9', deps), /tidak dijumpai/);
   assert.match(await handleCommand('trend', deps), /15m\* 🟢 UPTREND/);
-  assert.match(await handleCommand('harga', deps), /2651\.23/);
+  r = await handleCommand('harga', deps);
+  assert.match(r, /2651\.23/);
+  assert.match(r, /Alert aktif: 0/);
+  assert.match(r, /15m\* 🟢 UPTREND/);
+  store.add(2650, 100);
+  r = await handleCommand('harga', deps);
+  assert.match(r, /Alert aktif: 1/);
+  assert.match(r, /2660\.00 \(lagi 88 pip\).*2640\.00 \(lagi 112 pip\)/);
   assert.match(await handleCommand('set abc', deps), /Format/);
   assert.equal(await handleCommand('hello', deps), null);
 });

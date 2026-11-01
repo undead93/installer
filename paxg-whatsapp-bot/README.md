@@ -23,7 +23,7 @@ Bot ni pantau harga **PAXGUSDT (Bybit USDT Perpetual)** dan hantar alert ke What
 | `padam semua` | Padam semua alert aktif |
 | `sejarah padam` | Kosongkan sejarah |
 | `trend` | Trend 15m/30m/1H/4H + EMA 7/14/28 |
-| `harga` | Harga semasa (last, mark, high/low 24 jam) |
+| `harga` | Harga semasa + senarai alert aktif (berapa pip lagi) + trend |
 | `menu` | Papar senarai arahan |
 
 ### Contoh mesej alert
