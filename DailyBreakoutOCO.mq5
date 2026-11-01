@@ -9,14 +9,14 @@
 //+------------------------------------------------------------------+
 #property copyright "Daily Breakout OCO"
 #property version   "1.00"
-#property description "Buy Stop di High & Sell Stop di Low candle Daily semalam (OCO)"
+#property description "XAUUSD: Buy Stop di High & Sell Stop di Low candle Daily semalam (OCO)"
 
 #include <Trade\Trade.mqh>
 
 //--- Input
 input double InpLots           = 0.5;      // Lot size
 input double InpMinRangePips   = 800;      // Saiz minimum candle daily (pip)
-input int    InpPointsPerPip   = 10;       // 1 pip = berapa point (10 utk XAUUSD 2 digit / forex 5 digit)
+input double InpPipSize        = 0.10;     // Saiz 1 pip dalam harga (XAUUSD: 0.10 = 10 sen)
 input double InpStopLossPips   = 0;        // Stop Loss (pip), 0 = tiada
 input double InpTakeProfitPips = 20;       // Take Profit (pip), 0 = tiada
 input ulong  InpMagic          = 20261101; // Magic number
@@ -31,6 +31,14 @@ string   g_gvName;
 //+------------------------------------------------------------------+
 int OnInit()
 {
+   if(InpPipSize <= 0)
+   {
+      Print("InpPipSize mesti lebih dari 0");
+      return(INIT_PARAMETERS_INCORRECT);
+   }
+   if(StringFind(_Symbol, "XAU") < 0 && StringFind(_Symbol, "GOLD") < 0)
+      Print("Amaran: EA ni disetkan untuk XAUUSD, tapi chart sekarang ", _Symbol);
+
    trade.SetExpertMagicNumber(InpMagic);
    trade.SetDeviationInPoints(InpSlippage);
    trade.SetTypeFillingBySymbol(_Symbol);
@@ -112,7 +120,7 @@ bool ProcessNewDay(datetime today)
    if(high <= 0 || low <= 0)
       return(false);
 
-   double pip       = _Point * InpPointsPerPip;
+   double pip       = InpPipSize;
    double rangePips = (high - low) / pip;
 
    if(rangePips < InpMinRangePips)
@@ -274,7 +282,7 @@ void ShowInfo()
 {
    double high = iHigh(_Symbol, PERIOD_D1, 1);
    double low  = iLow(_Symbol, PERIOD_D1, 1);
-   double rangePips = (high - low) / (_Point * InpPointsPerPip);
+   double rangePips = (high - low) / InpPipSize;
 
    Comment(StringFormat("Daily Breakout OCO\n"
                         "High semalam : %s\n"
