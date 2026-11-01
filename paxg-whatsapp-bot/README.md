@@ -15,12 +15,11 @@ Bot ni pantau harga **PAXGUSDT (Bybit USDT Perpetual)** dan hantar alert ke What
 
 | Arahan | Fungsi |
 |---|---|
-| `set 2650` | Alert ±100 pip dari 2650 (naik 2660 / turun 2640) |
+| `set 2650` | Alert ±100 pip dari 2650 (naik 2660 / turun 2640). Hanya **satu** alert aktif: set harga baru akan ganti alert lama |
 | `set 2650 50` | Guna jarak 50 pip |
 | `set 2650 ulang` | Alert berterusan: bila kena, harga asal pindah ke paras baru dan bot terus pantau 100 pip seterusnya |
 | `list` / `senarai` | Senarai alert aktif + 10 alert terakhir yang sudah kena |
-| `padam 3` | Padam alert #3 |
-| `padam semua` | Padam semua alert aktif |
+| `padam` | Padam alert aktif |
 | `sejarah padam` | Kosongkan sejarah |
 | `trend` | Trend 15m/30m/1H/4H + EMA 7/14/28 |
 | `harga` | Harga semasa + senarai alert aktif (berapa pip lagi) + trend |

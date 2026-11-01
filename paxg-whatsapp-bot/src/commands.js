@@ -20,12 +20,11 @@ export function helpText(cfg) {
   return [
     `🤖 *BOT ALERT ${cfg.symbol}* (Bybit Futures)`,
     '',
-    `*set 2650* — alert bila harga naik/turun ${cfg.defaultPips} pip dari 2650`,
+    `*set 2650* — alert bila harga naik/turun ${cfg.defaultPips} pip dari 2650 (ganti alert lama)`,
     '*set 2650 50* — guna jarak 50 pip',
     '*set 2650 ulang* — alert berterusan setiap 100 pip',
     '*list* — senarai alert aktif + yang dah kena',
-    '*padam 3* — padam alert #3',
-    '*padam semua* — padam semua alert aktif',
+    '*padam* — padam alert aktif',
     '*sejarah padam* — kosongkan sejarah alert',
     '*trend* — trend 15m / 30m / 1H / 4H + EMA',
     '*harga* — harga semasa + alert aktif + trend',
@@ -100,6 +99,9 @@ export async function handleCommand(text, { store, cfg, getPrice, getTrends }) {
       const pipArg = args.slice(1).find((x) => /^\d+(\.\d+)?$/.test(x));
       const pips = pipArg ? Number(pipArg) : cfg.defaultPips;
       if (!(pips > 0)) return '❌ Jumlah pip mesti lebih dari 0';
+      // Hanya SATU alert aktif: set harga baru akan ganti alert lama
+      const old = store.active();
+      store.clearActive();
       const a = store.add(base, pips, repeat);
       let now = '';
       try {
@@ -108,7 +110,8 @@ export async function handleCommand(text, { store, cfg, getPrice, getTrends }) {
         /* abaikan */
       }
       return [
-        `✅ Alert *#${a.id}* ditambah${repeat ? ' (🔁 ulang)' : ''}`,
+        `✅ Alert *#${a.id}* ditetapkan${repeat ? ' (🔁 ulang)' : ''}`,
+        ...old.map((o) => `♻️ Alert lama #${o.id} (${f.price(o.base)}) diganti`),
         `Harga asal: ${f.price(a.base)} (±${a.pips} pip = ${f.price(a.step)})`,
         `⬆️ Naik: ${f.price(a.upper)}`,
         `⬇️ Turun: ${f.price(a.lower)}${now}`,
@@ -124,7 +127,7 @@ export async function handleCommand(text, { store, cfg, getPrice, getTrends }) {
     case 'del':
     case 'delete':
     case 'buang': {
-      if (args[0] === 'semua' || args[0] === 'all') return `🗑️ ${store.clearActive()} alert aktif dipadam.`;
+      if (!args.length || args[0] === 'semua' || args[0] === 'all') return `🗑️ ${store.clearActive()} alert aktif dipadam.`;
       const id = Number(String(args[0] ?? '').replace('#', ''));
       if (!Number.isInteger(id)) return '❌ Format: *padam 3* atau *padam semua*';
       return store.remove(id) ? `🗑️ Alert #${id} dipadam.` : `❌ Alert #${id} tidak dijumpai.`;

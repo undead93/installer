@@ -93,17 +93,20 @@ test('arahan WhatsApp', async () => {
   assert.match(r, /2705\.00/);
   assert.match(r, /ulang/);
 
+  assert.match(r, /Alert lama #1 \(2650\.00\) diganti/);
+
+  // hanya satu alert aktif
   r = await handleCommand('list', deps);
-  assert.match(r, /aktif: 2/);
-  assert.match(r, /#2.*🔁/);
-
-  store.check(2661);
-  r = await handleCommand('senarai', deps);
   assert.match(r, /aktif: 1/);
-  assert.match(r, /Sudah kena/);
-  assert.match(r, /NAIK @ 2661\.00/);
+  assert.match(r, /#2.*🔁/);
+  assert.doesNotMatch(r, /\*#1\*/);
 
-  assert.match(await handleCommand('padam 2', deps), /dipadam/);
+  store.check(2706);
+  r = await handleCommand('senarai', deps);
+  assert.match(r, /Sudah kena/);
+  assert.match(r, /NAIK @ 2706\.00/);
+
+  assert.match(await handleCommand('padam', deps), /1 alert aktif dipadam/);
   assert.match(await handleCommand('padam 9', deps), /tidak dijumpai/);
   assert.match(await handleCommand('trend', deps), /15m\* 🟢 UPTREND/);
   r = await handleCommand('harga', deps);
