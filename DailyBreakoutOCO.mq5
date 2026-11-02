@@ -4,6 +4,7 @@
 //|   1. Setiap hari baru, semak candle DAILY sebelumnya (shift 1).  |
 //|   2. Body candle (Open-Close) >= 600 pip DAN saiz penuh         |
 //|      (High-Low, termasuk shadow) >= 800 pip.                     |
+//|   2b. Tiada entry kalau candle semalam = candle akhir bulan.     |
 //|   3. Pasang BUY STOP di High dan SELL STOP di Low candle tu.     |
 //|   4. Bila salah satu trigger, order satu lagi terus dipadam (OCO)|
 //|   5. Order yang tak trigger dipadam bila masuk hari baru.        |
@@ -18,6 +19,7 @@
 input double InpLots           = 0.5;      // Lot size
 input double InpMinBodyPips    = 600;      // Body minimum candle daily, tanpa shadow (pip)
 input double InpMinRangePips   = 800;      // Saiz minimum candle daily, termasuk shadow (pip)
+input bool   InpSkipMonthEnd   = true;     // Tiada entry kalau candle semalam = hari akhir bulan
 input double InpPipSize        = 0.10;     // Saiz 1 pip dalam harga (XAUUSD: 0.10 = 10 sen)
 input double InpStopLossPips   = 0;        // Stop Loss (pip), 0 = tiada
 input double InpTakeProfitPips = 20;       // Take Profit (pip), 0 = tiada
@@ -115,6 +117,13 @@ bool ProcessNewDay(datetime today)
    //--- 2. Kalau hari ni dah ada trade trigger, jangan pasang lagi
    if(HasEntryDealSince(today))
       return(true);
+
+   //--- 2b. Candle semalam = candle terakhir bulan? (bulan dia lain dari hari ni)
+   if(InpSkipMonthEnd && IsPrevCandleMonthEnd(today))
+   {
+      Print("Candle semalam ialah candle akhir bulan. Tiada order hari ni.");
+      return(true);
+   }
 
    //--- 3. Ambil candle daily semalam (termasuk shadow)
    double high = iHigh(_Symbol, PERIOD_D1, 1);
@@ -286,6 +295,23 @@ double NormalizeLots(double lots)
 }
 
 //+------------------------------------------------------------------+
+//| True kalau candle D1 semalam ialah candle terakhir bulannya,     |
+//| iaitu bulan candle semalam berbeza dengan bulan candle hari ni.  |
+//| (Kalau 31hb jatuh hari Sabtu, candle Jumaat 30hb dikira akhir.)  |
+//+------------------------------------------------------------------+
+bool IsPrevCandleMonthEnd(datetime today)
+{
+   datetime prev = iTime(_Symbol, PERIOD_D1, 1);
+   if(prev == 0 || today == 0)
+      return(false);
+
+   MqlDateTime p, t;
+   TimeToStruct(prev, p);
+   TimeToStruct(today, t);
+   return(p.mon != t.mon);
+}
+
+//+------------------------------------------------------------------+
 void ShowInfo()
 {
    double high = iHigh(_Symbol, PERIOD_D1, 1);
@@ -294,7 +320,8 @@ void ShowInfo()
    double close = iClose(_Symbol, PERIOD_D1, 1);
    double rangePips = (high - low) / InpPipSize;
    double bodyPips  = MathAbs(close - open) / InpPipSize;
-   bool   layak     = (bodyPips >= InpMinBodyPips && rangePips >= InpMinRangePips);
+   bool   akhirBln  = InpSkipMonthEnd && IsPrevCandleMonthEnd(iTime(_Symbol, PERIOD_D1, 0));
+   bool   layak     = (bodyPips >= InpMinBodyPips && rangePips >= InpMinRangePips && !akhirBln);
 
    Comment(StringFormat("Daily Breakout OCO\n"
                         "High semalam : %s\n"
@@ -306,6 +333,6 @@ void ShowInfo()
                         DoubleToString(low, _Digits),
                         bodyPips, InpMinBodyPips,
                         rangePips, InpMinRangePips,
-                        layak ? "LAYAK" : "TAK LAYAK"));
+                        layak ? "LAYAK" : (akhirBln ? "TAK LAYAK (candle akhir bulan)" : "TAK LAYAK")));
 }
 //+------------------------------------------------------------------+
