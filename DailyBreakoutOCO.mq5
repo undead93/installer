@@ -2,7 +2,8 @@
 //|                                             DailyBreakoutOCO.mq5 |
 //|  Strategi:                                                       |
 //|   1. Setiap hari baru, semak candle DAILY sebelumnya (shift 1).  |
-//|   2. Saiz candle (High - Low, termasuk shadow) mesti >= MinPips. |
+//|   2. Body candle (Open-Close) >= 600 pip DAN saiz penuh         |
+//|      (High-Low, termasuk shadow) >= 800 pip.                     |
 //|   3. Pasang BUY STOP di High dan SELL STOP di Low candle tu.     |
 //|   4. Bila salah satu trigger, order satu lagi terus dipadam (OCO)|
 //|   5. Order yang tak trigger dipadam bila masuk hari baru.        |
@@ -15,7 +16,8 @@
 
 //--- Input
 input double InpLots           = 0.5;      // Lot size
-input double InpMinRangePips   = 800;      // Saiz minimum candle daily (pip)
+input double InpMinBodyPips    = 600;      // Body minimum candle daily, tanpa shadow (pip)
+input double InpMinRangePips   = 800;      // Saiz minimum candle daily, termasuk shadow (pip)
 input double InpPipSize        = 0.10;     // Saiz 1 pip dalam harga (XAUUSD: 0.10 = 10 sen)
 input double InpStopLossPips   = 0;        // Stop Loss (pip), 0 = tiada
 input double InpTakeProfitPips = 20;       // Take Profit (pip), 0 = tiada
@@ -120,18 +122,24 @@ bool ProcessNewDay(datetime today)
    if(high <= 0 || low <= 0)
       return(false);
 
-   double pip       = InpPipSize;
-   double rangePips = (high - low) / pip;
+   double open  = iOpen(_Symbol, PERIOD_D1, 1);
+   double close = iClose(_Symbol, PERIOD_D1, 1);
+   if(open <= 0 || close <= 0)
+      return(false);
 
-   if(rangePips < InpMinRangePips)
+   double pip       = InpPipSize;
+   double rangePips = (high - low) / pip;              // termasuk shadow
+   double bodyPips  = MathAbs(close - open) / pip;     // body sahaja
+
+   if(bodyPips < InpMinBodyPips || rangePips < InpMinRangePips)
    {
-      PrintFormat("Candle daily semalam = %.1f pip (< %.1f). Tiada order hari ni.",
-                  rangePips, InpMinRangePips);
+      PrintFormat("Candle daily semalam: body %.1f pip (min %.1f), penuh %.1f pip (min %.1f). Tak layak, tiada order hari ni.",
+                  bodyPips, InpMinBodyPips, rangePips, InpMinRangePips);
       return(true);
    }
 
-   PrintFormat("Candle daily semalam = %.1f pip. High=%s Low=%s. Pasang order.",
-               rangePips, DoubleToString(high, _Digits), DoubleToString(low, _Digits));
+   PrintFormat("Candle daily semalam: body %.1f pip, penuh %.1f pip. High=%s Low=%s. Pasang order.",
+               bodyPips, rangePips, DoubleToString(high, _Digits), DoubleToString(low, _Digits));
 
    double lots    = NormalizeLots(InpLots);
    double minDist = MathMax((double)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL),
@@ -282,16 +290,22 @@ void ShowInfo()
 {
    double high = iHigh(_Symbol, PERIOD_D1, 1);
    double low  = iLow(_Symbol, PERIOD_D1, 1);
+   double open  = iOpen(_Symbol, PERIOD_D1, 1);
+   double close = iClose(_Symbol, PERIOD_D1, 1);
    double rangePips = (high - low) / InpPipSize;
+   double bodyPips  = MathAbs(close - open) / InpPipSize;
+   bool   layak     = (bodyPips >= InpMinBodyPips && rangePips >= InpMinRangePips);
 
    Comment(StringFormat("Daily Breakout OCO\n"
                         "High semalam : %s\n"
                         "Low semalam  : %s\n"
-                        "Saiz candle  : %.1f pip (min %.1f)\n"
+                        "Body candle  : %.1f pip (min %.1f)\n"
+                        "Saiz penuh   : %.1f pip (min %.1f)\n"
                         "Status       : %s",
                         DoubleToString(high, _Digits),
                         DoubleToString(low, _Digits),
+                        bodyPips, InpMinBodyPips,
                         rangePips, InpMinRangePips,
-                        rangePips >= InpMinRangePips ? "LAYAK" : "TAK LAYAK"));
+                        layak ? "LAYAK" : "TAK LAYAK"));
 }
 //+------------------------------------------------------------------+
