@@ -1,0 +1,7 @@
+models/
+log/
+tangkapan/
+pangkalan.npz
+orang/*/
+*.mp4
+__pycache__/
