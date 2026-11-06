@@ -93,6 +93,23 @@ Untuk simpan tetapan, buat fail `tetapan.ps1` yang mengandungi baris-baris `$env
 - Supaya PC tidak tidur, pergi ke Settings, kemudian System, kemudian Power, dan tetapkan *Sleep* kepada **Never** semasa sistem berjalan.
 - Untuk pindah ke Mac nanti, salin folder `orang/`, `whatsapp/auth/` dan fail `tetapan.json`. Wajah yang sudah dinamakan, sesi WhatsApp dan mesej khas akan ikut sekali, jadi tak perlu daftar atau imbas QR semula.
 
+## Masuk atau keluar rumah
+
+Dalam tab **Langsung**, pilih **Arah kamera ini** untuk setiap kamera:
+
+| Pilihan | Sesuai untuk |
+|---|---|
+| Orang yang dilihat kamera ini sedang **MASUK** | Kamera di luar yang menghadap laluan masuk (contohnya pagar). Kamera ini nampak wajah orang yang datang |
+| Orang yang dilihat kamera ini sedang **KELUAR** | Kamera **di dalam rumah yang menghadap pintu**. Kamera ini nampak wajah orang yang keluar |
+| **Ikut arah gerakan** (berjalan ke arah kamera = MASUK atau KELUAR) | Satu kamera yang nampak wajah dari kedua-dua arah. Wajah yang makin besar bermaksud orang itu berjalan ke arah kamera |
+
+Sistem kenal wajah perlukan muka. Orang yang keluar biasanya membelakangkan kamera luar, jadi cara paling tepat
+ialah satu kamera **MASUK** di luar dan satu kamera **KELUAR** di dalam rumah.
+
+Notifikasi akan berbeza untuk masuk dan keluar (`🏠 Isteri dah balik` / `🚪 Isteri keluar rumah`). Mesej bila keluar
+boleh diubah dalam kad setiap orang. Tab **Log & video** menunjukkan **Siapa di rumah**, contohnya
+🟢 *Di rumah sejak 6:45 PM* atau ⚪ *Keluar 8:02 AM*. Status ini disimpan dalam `status.json`.
+
 ## Daftar wajah dengan kamera (webcam / telefon)
 
 Dalam tab **Orang berdaftar**, guna kad **📷 Daftar wajah dengan kamera**. Taip nama dan tekan **Buka kamera**, kemudian

@@ -88,6 +88,14 @@
                    font-weight: 600; font-size: 17px; background: linear-gradient(transparent, rgba(0,0,0,.75)); }
   #hasil-tangkap .gmb { cursor: default; }
   .tanda { position: absolute; right: 3px; top: 3px; font-size: 14px; }
+  .status { font-size: 13px; padding: 2px 8px; border-radius: 10px; margin-left: 6px; white-space: nowrap; }
+  .status.masuk { background: rgba(22,163,74,.15); color: var(--ok); }
+  .status.keluar { background: var(--garis); color: var(--pudar); }
+  .dirumah { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+  .dirumah .kad { margin: 0; padding: 10px 12px; display: flex; align-items: center; gap: 10px; min-width: 150px; }
+  .dirumah img { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; }
+  select { padding: 9px 10px; font: inherit; color: var(--teks); background: var(--bg); border: 1px solid var(--garis);
+           border-radius: 8px; flex: 1 1 220px; min-width: 0; }
   .pilih { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--pudar); cursor: pointer; }
   .pilih input { width: 18px; height: 18px; accent-color: var(--utama); margin: 0; }
   .kad.dipilih { outline: 2px solid var(--utama); outline-offset: -1px; }
@@ -185,6 +193,8 @@
   </section>
 
   <section id="t-log" hidden>
+    <h2>Siapa di rumah</h2>
+    <div class="dirumah" id="dirumah"></div>
     <h2>Klip video</h2>
     <div class="klip-grid" id="senarai-klip"></div>
     <h2>Log hari ini</h2>
@@ -208,6 +218,19 @@
       <span class="pudar" style="flex:1 1 100%">Seret jari di atas video untuk lukis kawasan. Hanya wajah dalam kawasan ini akan diproses.</span>
       <button class="btn" id="btn-zon-batal">Batal</button>
       <button class="btn utama" id="btn-zon-simpan">Simpan zon</button>
+    </div>
+    <div class="kad" style="margin-top:12px">
+      <b>Arah kamera ini</b>
+      <p class="pudar" style="margin:4px 0 0">Untuk tahu sama ada orang masuk atau keluar rumah.</p>
+      <div class="baris">
+        <select id="arah-kamera" aria-label="Arah kamera">
+          <option value="tiada">Tiada (hanya "dikesan")</option>
+          <option value="masuk">Orang yang dilihat kamera ini sedang MASUK rumah</option>
+          <option value="keluar">Orang yang dilihat kamera ini sedang KELUAR rumah</option>
+          <option value="gerak_masuk">Ikut arah gerakan: berjalan ke arah kamera = MASUK</option>
+          <option value="gerak_keluar">Ikut arah gerakan: berjalan ke arah kamera = KELUAR</option>
+        </select>
+      </div>
     </div>
     <p class="bantu" style="margin-top:10px">Kotak berlabel nama pada wajah, kad muka (gambar, nama, masa) di penjuru kanan,
       dan zon pengesanan hijau. Dikemas kini beberapa kali sesaat.</p>
@@ -344,7 +367,7 @@ function lukisOrang() {
     return;
   }
   el.innerHTML = data.orang.map(o => `<div class="kad" data-nama="${esc(o.nama)}">
-      <div class="atas"><b>${esc(o.nama)}</b><span class="pudar">${o.gambar.length} gambar</span></div>
+      <div class="atas"><b>${esc(o.nama)}${statusHtml(o.status)}</b><span class="pudar">${o.gambar.length} gambar</span></div>
       <div class="grid">${o.gambar.map(g => `<button class="gmb ${g.curiga ? 'curiga' : ''}" data-rel="${esc(g.rel)}"
           data-url="${g.url}" data-padan="${g.padan}" data-skor="${g.skor ?? ''}" data-curiga="${g.curiga ? 1 : ''}"
           title="Ketik untuk pindah atau padam"><img loading="lazy" src="${g.url}" alt="">
@@ -355,8 +378,13 @@ function lukisOrang() {
         <span>Hantar notifikasi bila ${esc(o.nama)} dikesan</span></label>
       <div class="baris">
         <input type="text" class="mesej" maxlength="200" value="${esc(o.mesej)}"
-               placeholder="✅ ${esc(o.nama)} dikesan di kamera" aria-label="Mesej notifikasi untuk ${esc(o.nama)}">
+               placeholder="🏠 ${esc(o.nama)} masuk rumah / dikesan" aria-label="Mesej notifikasi untuk ${esc(o.nama)}">
         <button class="btn" data-tindakan="mesej">Simpan mesej</button>
+      </div>
+      <div class="baris">
+        <input type="text" class="mesej mesej-keluar" maxlength="200" value="${esc(o.mesej_keluar || '')}"
+               placeholder="🚪 ${esc(o.nama)} keluar rumah" aria-label="Mesej bila ${esc(o.nama)} keluar">
+        <button class="btn" data-tindakan="mesej-keluar">Simpan mesej keluar</button>
       </div>
       <div class="baris">
         <button class="btn" data-tindakan="tambah">Tambah gambar</button>
@@ -378,14 +406,27 @@ function lukisKlip() {
     : '<div class="pudar">Belum ada klip. Klip dirakam bila orang dikesan dan notifikasi dihantar.</div>';
 }
 
+function statusHtml(st) {
+  if (!st) return '';
+  return st.arah === 'masuk' ? `<span class="status masuk">🟢 Di rumah sejak ${esc(st.masa)}</span>`
+                             : `<span class="status keluar">⚪ Keluar ${esc(st.masa)}</span>`;
+}
+function lukisDiRumah() {
+  const ada = data.orang.filter(o => o.status);
+  $('#dirumah').innerHTML = ada.length
+    ? ada.sort((x, y) => (x.status.arah === 'masuk' ? 0 : 1) - (y.status.arah === 'masuk' ? 0 : 1)).map(o => `<div class="kad">
+        ${o.gambar[0] ? `<img src="${o.gambar[0].url}" alt="">` : ''}
+        <div><b>${esc(o.nama)}</b><div>${statusHtml(o.status).replace('class="status', 'style="margin:0" class="status')}</div></div></div>`).join('')
+    : '<div class="pudar">Belum ada rekod masuk/keluar. Tetapkan <b>Arah kamera</b> dalam tab Langsung.</div>';
+}
 function lukisLog() {
-  lukisKlip();
+  lukisKlip(); lukisDiRumah();
   const banyak = (data.kamera || []).length > 1;
   $('#th-kamera').hidden = !banyak;
   $('#isi-log').innerHTML = data.log.length
     ? data.log.map(r => `<tr><td>${esc(r[0].slice(11))}</td>
         <td class="${r[1] === 'TIDAK DIKENALI' ? 'asing' : ''}">${esc(r[1])}${r[3] ? ' #' + esc(r[3].slice(-4)) : ''}</td>
-        <td>${esc(r[2])}</td>${banyak ? `<td>${esc(r[4] || '')}</td>` : ''}</tr>`).join('')
+        <td>${r[5] ? (r[5] === 'masuk' ? '🟢 MASUK' : '⚪ KELUAR') : esc(r[2])}</td>${banyak ? `<td>${esc(r[4] || '')}</td>` : ''}</tr>`).join('')
     : `<tr><td colspan="4" class="pudar">Belum ada rekod hari ini.</td></tr>`;
   lukisPilihKamera();
 }
@@ -407,7 +448,17 @@ function mulaStrim() {
 }
 // ---- zon pengesanan
 function kameraZon() { return kameraLangsung || (data.kamera || [])[0] || null; }
+function lukisArah() {
+  const el = $('#arah-kamera'); el.disabled = !kameraZon();
+  if (document.activeElement !== el) el.value = (data.arah || {})[kameraZon()] || 'tiada';
+}
+$('#arah-kamera').addEventListener('change', async e => {
+  try { await post('/api/arah', { kamera: kameraZon(), arah: e.target.value });
+        toast('Arah kamera disimpan'); e.target.blur(); muat(true); }
+  catch (err) { toast(err.message); }
+});
 function lukisZonStatus() {
+  lukisArah();
   $('#btn-zon').disabled = !kameraZon();
   if (!kameraZon()) { $('#zon-status').textContent = 'Menunggu kamera...'; $('#btn-zon-buang').hidden = true; return; }
   const z = (data.zon || {})[kameraZon()];
@@ -641,8 +692,15 @@ $('#senarai-orang').addEventListener('click', async e => {
     if (gmb) return bukaMenuGambar(gmb, nama);
     const t = e.target.closest('[data-tindakan]'); if (!t) return;
     if (t.dataset.tindakan === 'tambah') return kad.querySelector('input[type=file]').click();
+    if (t.dataset.tindakan === 'mesej-keluar') {
+      const mesej = kad.querySelector('input.mesej-keluar').value.trim();
+      await post('/api/mesej', { nama, mesej, jenis: 'keluar' });
+      document.activeElement && document.activeElement.blur();
+      toast(mesej ? `Mesej keluar disimpan: "${mesej}"` : 'Mesej keluar dikembalikan ke asal');
+      return muat(true);
+    }
     if (t.dataset.tindakan === 'mesej') {
-      const mesej = kad.querySelector('input.mesej').value.trim();
+      const mesej = kad.querySelector('input.mesej:not(.mesej-keluar)').value.trim();
       await post('/api/mesej', { nama, mesej });
       document.activeElement && document.activeElement.blur();
       toast(mesej ? `Mesej disimpan: "${mesej}"` : 'Mesej dikembalikan ke asal');

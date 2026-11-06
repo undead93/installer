@@ -50,7 +50,9 @@ TANGKAPAN = ROOT / "tangkapan"    # gambar penuh semasa orang tidak dikenali dik
 KLIP_DIR = ROOT / "klip"          # klip video yang dihantar bersama notifikasi
 HALAMAN = ROOT / "halaman.html"
 WA_DIR = ROOT / "whatsapp"         # penghantar WhatsApp (Baileys, Node.js)
-TETAPAN = ROOT / "tetapan.json"   # siapa yang tidak hantar notifikasi, dll
+TETAPAN = ROOT / "tetapan.json"
+STATUS = ROOT / "status.json"      # siapa di rumah: arah & masa terakhir setiap orang
+ARAH_SAH = ("tiada", "masuk", "keluar", "gerak_masuk", "gerak_keluar")   # siapa yang tidak hantar notifikasi, dll
 
 MODELS = {
     "face_detection_yunet_2023mar.onnx": "models/face_detection_yunet/face_detection_yunet_2023mar.onnx",
@@ -388,6 +390,12 @@ class Stor:
         self.tetapan.setdefault("senyap", [])  # orang berdaftar yang TIDAK hantar notifikasi
         self.tetapan.setdefault("mesej", {})   # mesej notifikasi khas, cth {"Isteri": "🏠 Isteri dah balik"}
         self.tetapan.setdefault("zon", {})     # nama kamera -> [x0, y0, x1, y1] (0..1): kawasan wajah diproses
+        self.tetapan.setdefault("arah", {})    # nama kamera -> salah satu ARAH_SAH
+        self.tetapan.setdefault("mesej_keluar", {})  # mesej khas bila orang keluar rumah
+        try:
+            self.status = json.loads(STATUS.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            self.status = {}
         self.peristiwa = {}                    # nama kamera -> deque kad muka terkini untuk paparan langsung
         ORANG.mkdir(exist_ok=True)
         WAJAH_BARU.mkdir(exist_ok=True)
@@ -756,9 +764,12 @@ class Stor:
             else:
                 sumber.rename(sasaran)
             t = self.tetapan
-            if lama in t["mesej"]:
-                m = t["mesej"].pop(lama)
-                t["mesej"].setdefault(baru, m.replace(lama, baru))
+            for k in ("mesej", "mesej_keluar"):
+                if lama in t[k]:
+                    m = t[k].pop(lama)
+                    t[k].setdefault(baru, m.replace(lama, baru))
+            if lama in self.status:
+                self.status.setdefault(baru, self.status.pop(lama))
             if lama in t["senyap"]:
                 t["senyap"] = sorted((set(t["senyap"]) - {lama}) | {baru})
             self._simpan_tetapan()
@@ -773,23 +784,51 @@ class Stor:
                 self.set_maklum(nama, True)
             if nama in self.tetapan["mesej"]:
                 self.set_mesej(nama, "")
+            if nama in self.tetapan["mesej_keluar"]:
+                self.set_mesej(nama, "", "keluar")
+            self.status.pop(nama, None)
 
     # ---- notifikasi bagi setiap orang
     def maklum_hidup(self, nama):
         return nama not in self.tetapan["senyap"]
 
-    def mesej_untuk(self, nama):
-        return self.tetapan["mesej"].get(nama) or f"✅ {nama} dikesan di kamera"
+    def mesej_untuk(self, nama, arah=None):
+        if arah == "keluar":
+            return self.tetapan["mesej_keluar"].get(nama) or f"🚪 {nama} keluar rumah"
+        return self.tetapan["mesej"].get(nama) or (f"🏠 {nama} masuk rumah" if arah == "masuk"
+                                                     else f"✅ {nama} dikesan di kamera")
 
-    def set_mesej(self, nama, mesej):
+    def set_mesej(self, nama, mesej, jenis="masuk"):
         nama = self.semak_nama(nama)
         mesej = (mesej or "").strip()[:200]
+        kunci = "mesej_keluar" if jenis == "keluar" else "mesej"
         with self.kunci:
             if mesej:
-                self.tetapan["mesej"][nama] = mesej
+                self.tetapan[kunci][nama] = mesej
             else:
-                self.tetapan["mesej"].pop(nama, None)
+                self.tetapan[kunci].pop(nama, None)
             self._simpan_tetapan()
+
+    # ---- arah kamera (masuk / keluar) dan status siapa di rumah
+    def arah_untuk(self, kamera):
+        return self.tetapan["arah"].get(kamera, "tiada")
+
+    def set_arah(self, kamera, arah):
+        if not isinstance(kamera, str) or kamera not in self.kamera:
+            raise ValueError("Kamera belum sedia atau tidak dikenali.")
+        if arah not in ARAH_SAH:
+            raise ValueError("Arah tidak sah.")
+        with self.kunci:
+            if arah == "tiada":
+                self.tetapan["arah"].pop(kamera, None)
+            else:
+                self.tetapan["arah"][kamera] = arah
+            self._simpan_tetapan()
+
+    def kemas_status(self, nama, arah, kamera):
+        with self.kunci:
+            self.status[nama] = {"arah": arah, "masa": time.time(), "kamera": kamera}
+            STATUS.write_text(json.dumps(self.status, indent=2, ensure_ascii=False), encoding="utf-8")
 
     def _simpan_tetapan(self):
         TETAPAN.write_text(json.dumps(self.tetapan, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -852,7 +891,12 @@ class Stor:
                 for g in gambar:  # gambar yang padan dengan kebanyakan pengesanan tetapi skornya rendah
                     g["curiga"] = bool(g["padan"] >= 10 and len(gambar) > 2 and g["padan"] > 0.5 * jumlah
                                        and g["skor"] is not None and g["skor"] < self.ambang + 0.1)
+                st = self.status.get(d.name)
                 orang.append({"nama": d.name, "gambar": gambar, "maklum": self.maklum_hidup(d.name),
+                              "mesej_keluar": self.tetapan["mesej_keluar"].get(d.name, ""),
+                              "status": {"arah": st["arah"], "kamera": st.get("kamera", ""),
+                                         "masa": datetime.fromtimestamp(st["masa"]).strftime("%d/%m %I:%M %p")}
+                              if st else None,
                               "mesej": self.tetapan["mesej"].get(d.name, "")})
         log = []
         if self.log_path and self.log_path.exists():
@@ -873,6 +917,7 @@ class Stor:
                 "kamera": list(self.kamera) or list(self.bingkai),
                 "zon": dict(self.tetapan["zon"]),
                 "https": getattr(self, "port_https", None),
+                "arah": dict(self.tetapan["arah"]),
                 "saluran": self.notif.nama if self.notif else [],
                 "whatsapp": self.notif.whatsapp.status()
                 if self.notif and self.notif.whatsapp.aktif else None}
@@ -1115,10 +1160,12 @@ def mula_web(stor, port, kata_laluan, port_https=0):
                     stor.padam_orang(d.get("nama"))
                 elif url.path == "/api/maklum":
                     stor.set_maklum(d.get("nama"), bool(d.get("hidup")))
+                elif url.path == "/api/arah":
+                    stor.set_arah(d.get("kamera"), d.get("arah"))
                 elif url.path == "/api/zon":
                     stor.set_zon(d.get("kamera"), d.get("zon"))
                 elif url.path == "/api/mesej":
-                    stor.set_mesej(d.get("nama"), d.get("mesej", ""))
+                    stor.set_mesej(d.get("nama"), d.get("mesej", ""), d.get("jenis", "masuk"))
                 elif url.path == "/api/uji-maklum":
                     if not stor.notif or not stor.notif.saluran:
                         raise ValueError("Notifikasi belum disetkan. Set WHATSAPP_KE (lihat README).")
@@ -1603,6 +1650,8 @@ class KonteksKamera:
         self.kesan_akhir = 0.0    # masa terakhir pengesanan wajah dijalankan
         self.cache = []           # [(kotak, cap jari, masa)] dari bingkai sebelumnya
         self.kad_baru = set()  # kad orang asing yang baru dicipta (untuk label 🆕)
+        self.sejarah = {}      # kunci -> deque[(masa, saiz wajah)]: untuk tahu arah gerakan
+        self.tertunda = {}     # kunci -> notifikasi yang menunggu arah gerakan jelas
 
 
 def senarai_kamera(a):
@@ -1643,7 +1692,7 @@ def cmd_pantau(a):
     log_f = open(log_path, "a", newline="", encoding="utf-8")
     log = csv.writer(log_f)
     if baru:
-        log.writerow(["masa", "nama", "skor", "kumpulan", "kamera"])
+        log.writerow(["masa", "nama", "skor", "kumpulan", "kamera", "arah"])
         log_f.flush()
     stor.log_path = log_path
 
@@ -1722,10 +1771,68 @@ def cmd_pantau(a):
             diag_akhir[kunci] = time.time()
             print(f"[maklum] {mesej}")
 
+    def arah_gerakan(sej_saiz):
+        """'dekat' jika wajah makin besar (berjalan ke arah kamera), 'jauh' jika makin kecil, None jika tak pasti."""
+        saiz = [w for _, w in sej_saiz]
+        if len(saiz) < 4:
+            return None
+        n = max(1, len(saiz) // 3)
+        nisbah = float(np.median(saiz[-n:])) / max(1.0, float(np.median(saiz[:n])))
+        return "dekat" if nisbah > 1.15 else "jauh" if nisbah < 0.87 else None
+
+    def cetus(kk, kunci, nama, kid, img, t_kam, sekarang, arah):
+        """Hantar notifikasi (dengan klip) untuk orang yang telah disahkan."""
+        if nama is not None:
+            baris = stor.mesej_untuk(nama, arah)
+        else:
+            baris = ("🆕 Orang baru tidak dikenali" if kid in kk.kad_baru else "⚠️ Orang tidak dikenali") + \
+                {"masuk": " – sedang masuk", "keluar": " – sedang keluar"}.get(arah, "")
+        km = f"{kunci}:{arah or '-'}"  # masuk & keluar ada cooldown berasingan
+        if sekarang - kali_maklum.get(km, 0) < a.cooldown_maklum:
+            return
+        kali_maklum[km] = sekarang
+        kk.kad_baru.discard(kid)
+        if arah:
+            if nama is not None:
+                stor.kemas_status(nama, arah, kk.nama)
+            masa = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            log.writerow([masa, nama or "TIDAK DIKENALI", "", kid or "", kk.nama, arah])
+            log_f.flush()
+            print(f"{masa}  [{arah.upper()}] {nama or 'TIDAK DIKENALI'}" + (f"  [{kk.nama}]" if banyak else ""))
+        if not guna_video:
+            notif.hantar(susun_teks([baris], sekarang, nama is None, kk.nama), img)
+            return
+        # gabungkan orang yang disahkan dalam 3 saat yang sama (kamera sama) ke dalam satu klip
+        k = kk.klip_semasa
+        if k is None or k.siap.is_set() or t_kam - k.t_mula > 3:
+            k = Klip([], t_kam, t_kam + a.klip_selepas) if kk.perakam else kk.kam.mula_klip(a.klip_selepas)
+            k.img = img
+            kk.klip_semasa = k
+            th = threading.Thread(target=hantar_klip, args=(k, kk), daemon=True)
+            th.start()
+            threads_klip.append(th)
+        k.baris.append(baris)
+        k.label.append(nama or "TIDAK-DIKENALI")
+        k.asing |= nama is None
+
+    def semak_tertunda(kk, sekarang):
+        """Kamera 'ikut arah gerakan': putuskan masuk/keluar bila gerakan sudah jelas atau orang itu hilang."""
+        mod = stor.arah_untuk(kk.nama)
+        for kunci, t in list(kk.tertunda.items()):
+            sej_saiz = kk.sejarah.get(kunci) or deque()
+            akhir = sej_saiz[-1][0] if sej_saiz else t["t"]
+            if sekarang - t["t"] < 2.5 and sekarang - akhir < 1.5:
+                continue  # tunggu lagi
+            del kk.tertunda[kunci]
+            g = arah_gerakan(sej_saiz)
+            arah = None if g is None else ("masuk" if (g == "dekat") == (mod == "gerak_masuk") else "keluar")
+            cetus(kk, kunci, t["nama"], t["kid"], t["img"], t["t_kam"], sekarang, arah)
+
     def proses(kk, img):
         kam = kk.kam
         sekarang = time.time()
         kotak = []
+        semak_tertunda(kk, sekarang)
         # --- jimat CPU: langkau pengesanan wajah bila tiada gerakan dan tiada wajah baru-baru ini
         kecil = cv2.GaussianBlur(cv2.cvtColor(cv2.resize(img, (320, 180)), cv2.COLOR_BGR2GRAY), (5, 5), 0)
         gerak = kk.kelabu_lepas is None or float((cv2.absdiff(kecil, kk.kelabu_lepas) > 25).mean()) > 0.0005
@@ -1790,6 +1897,14 @@ def cmd_pantau(a):
                 if nama is None:
                     cv2.imwrite(str(TANGKAPAN / f"asing_{datetime.now():%Y%m%d_%H%M%S}_{slug(kk.nama)}.jpg"), img)
 
+            # --- sejarah saiz wajah (untuk arah gerakan: makin besar = berjalan ke arah kamera)
+            ss = kk.sejarah.setdefault(kunci, deque(maxlen=80))
+            ss.append((sekarang, float(max(w, h))))
+            while ss and ss[0][0] < sekarang - 8:
+                ss.popleft()
+            if len(kk.sejarah) > 200:
+                kk.sejarah = {k: v for k, v in kk.sejarah.items() if v and v[-1][0] >= sekarang - 8}
+
             # --- pengesahan: notifikasi hanya bila orang yang sama dikesan beberapa kali dengan yakin
             elok = bool(min(w, h) >= a.saiz_min_maklum and stor._menghadap(face))  # wajah jelas & menghadap
             beza = stor.beza_kedua(f, nama) if nama is not None else 0.0
@@ -1814,35 +1929,19 @@ def cmd_pantau(a):
                 if sebab:
                     diag_maklum(f"{nama}@{kk.nama}", f"{nama} dikesan tetapi belum pasti: {sebab}")
                     continue
-                baris = stor.mesej_untuk(nama)
             else:
                 if a.tanpa_maklum_asing or mungkin or max(sk for _, sk, _, _ in sej) >= a.ambang - 0.04:
                     continue  # mungkin ahli keluarga dalam keadaan sukar (malam/sisi): jangan beri amaran palsu
                 if bil_elok < perlu_elok:
                     diag_maklum(f"asing@{kk.nama}", "orang tidak dikenali, tetapi wajah kurang jelas: amaran tidak dihantar")
                     continue
-                baris = "🆕 Orang baru tidak dikenali" if kid in kk.kad_baru else "⚠️ Orang tidak dikenali"
-            if sekarang - kali_maklum.get(kunci, 0) < a.cooldown_maklum:
-                continue
-            kali_maklum[kunci] = sekarang
             sej.clear()
-            kk.kad_baru.discard(kid)
-            if not guna_video:
-                notif.hantar(susun_teks([baris], sekarang, nama is None, kk.nama), img)
+            mod = stor.arah_untuk(kk.nama)
+            if mod in ("gerak_masuk", "gerak_keluar"):
+                if kunci not in kk.tertunda:  # tunggu arah gerakan jelas sebelum hantar
+                    kk.tertunda[kunci] = {"nama": nama, "kid": kid, "img": img, "t": sekarang, "t_kam": kam.masa}
                 continue
-            # gabungkan orang yang disahkan dalam 3 saat yang sama (kamera sama) ke dalam satu klip
-            k = kk.klip_semasa
-            if k is None or k.siap.is_set() or kam.masa - k.t_mula > 3:
-                k = Klip([], kam.masa, kam.masa + a.klip_selepas) if kk.perakam \
-                    else kam.mula_klip(a.klip_selepas)
-                k.img = img
-                kk.klip_semasa = k
-                th = threading.Thread(target=hantar_klip, args=(k, kk), daemon=True)
-                th.start()
-                threads_klip.append(th)
-            k.baris.append(baris)
-            k.label.append(nama or "TIDAK-DIKENALI")
-            k.asing |= nama is None
+            cetus(kk, kunci, nama, kid, img, kam.masa, sekarang, mod if mod in ("masuk", "keluar") else None)
 
         kk.cache = cache_baru
         if kotak:
@@ -1882,6 +1981,8 @@ def cmd_pantau(a):
             if not diproses:
                 time.sleep(0.01)
         if all(kk.kam.fail_video for kk in kamera):
+            for kk in kamera:
+                semak_tertunda(kk, time.time() + 10)  # putuskan arah yang masih menunggu
             for kk in kamera:
                 kk.kam.tutup()  # siapkan klip yang masih dirakam
             for th in threads_klip:
