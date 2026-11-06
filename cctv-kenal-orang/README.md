@@ -229,6 +229,11 @@ Simpan semua baris `export` dalam fail `tetapan.sh`, kemudian jalankan:
 
 ## Tips ketepatan
 
+**Wajah jauh tidak dikesan?** Sistem mengecilkan gambar kamera ke lebar 1280 piksel sebelum mencari wajah (`--lebar-kesan`).
+Pada kamera 2K, ini mengesan wajah dari kira-kira 60 piksel. Untuk orang yang lebih jauh, guna `--lebar-kesan 1920`
+dan `--saiz-min 40`. Ini perlukan lebih CPU, dan wajah yang kecil kurang tepat untuk dikenal.
+Terminal akan beritahu bila orang tidak dikenali dikesan tetapi gambarnya tidak disimpan, beserta sebabnya.
+
 **Orang yang sama dalam satu kad.** Sistem mengemas kad secara automatik dengan tiga cara:
 - Wajah baru yang padan dengan beberapa kad akan **menggabungkan** kad-kad itu.
 - Setiap kali sistem dimulakan, dan setiap jam, kad yang mirip satu sama lain digabung. Kad yang padan dengan orang yang sudah berdaftar dimasukkan terus ke nama orang itu.

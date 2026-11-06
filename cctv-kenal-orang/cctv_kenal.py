@@ -54,7 +54,7 @@ MIRRORS = [
     "https://media.githubusercontent.com/media/opencv/opencv_zoo/main/",
 ]
 IMG_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
-DETECT_WIDTH = 640  # bingkai besar dikecilkan ke lebar ini untuk kesan wajah (lebih laju)
+DETECT_WIDTH = 1280  # bingkai besar dikecilkan ke lebar ini untuk kesan wajah (640 terlepas wajah <~135px pada 2K)
 NAMA_SAH = re.compile(r"^[\w][\w .'-]{0,39}$")
 
 
@@ -104,8 +104,9 @@ def pastikan_model():
 
 
 class Enjin:
-    def __init__(self, skor_kesan=0.8):
+    def __init__(self, skor_kesan=0.8, lebar_kesan=DETECT_WIDTH):
         pastikan_model()
+        self.lebar_kesan = lebar_kesan
         self.kunci = threading.Lock()  # model OpenCV tidak selamat diguna serentak oleh beberapa thread
         self.det = cv2.FaceDetectorYN.create(
             str(MODEL_DIR / "face_detection_yunet_2023mar.onnx"), "", (320, 320), skor_kesan, 0.3, 5000)
@@ -115,7 +116,7 @@ class Enjin:
     def kesan(self, img):
         """Pulangkan senarai baris wajah (koordinat ikut saiz asal imej)."""
         h, w = img.shape[:2]
-        skala = min(1.0, DETECT_WIDTH / w)
+        skala = min(1.0, self.lebar_kesan / w)
         kecil = cv2.resize(img, (int(w * skala), int(h * skala))) if skala < 1 else img
         with self.kunci:
             self.det.setInputSize((kecil.shape[1], kecil.shape[0]))
@@ -551,6 +552,13 @@ class Stor:
         if kotak is not None:
             self.kotak[kamera] = (time.time(), kotak)
 
+    def bingkai_terkini(self):
+        """Bingkai terbaru dari kamera pertama (untuk notifikasi ujian), atau None."""
+        for nama, kam in self.kamera.items():
+            if kam.terkini is not None:
+                return kam.terkini
+        return next((b for b in self.bingkai.values() if b is not None), None)
+
     def jpg_terkini(self, kamera=None):
         """Bingkai terkini terus dari kamera (lancar), dengan kotak nama terkini dilukis di atasnya."""
         nama = kamera if kamera in self.kamera or kamera in self.bingkai else \
@@ -714,7 +722,8 @@ def mula_web(stor, port, kata_laluan):
                 elif url.path == "/api/uji-maklum":
                     if not stor.notif or not stor.notif.saluran:
                         raise ValueError("Notifikasi belum disetkan. Set WHATSAPP_KE (lihat README).")
-                    ralat = stor.notif.hantar_segera("🔔 Ujian notifikasi dari CCTV Kenal Orang", stor.bingkai)
+                    ralat = stor.notif.hantar_segera("🔔 Ujian notifikasi dari CCTV Kenal Orang",
+                                                     stor.bingkai_terkini())
                     if ralat:
                         raise ValueError("Gagal: " + "; ".join(ralat))
                 else:
@@ -1181,7 +1190,7 @@ def senarai_kamera(a):
 
 
 def cmd_pantau(a):
-    enjin = Enjin()
+    enjin = Enjin(lebar_kesan=a.lebar_kesan)
     stor = Stor(enjin, a.ambang, a.ambang_kumpul, a.maks_gambar, a.selang_simpan, a.saiz_min)
     stor.bersih(a.simpan_hari)
     print(f"Orang berdaftar: {len(set(stor.nama))} ({', '.join(sorted(set(stor.nama))) or '-'})")
@@ -1408,6 +1417,9 @@ def main():
     m.add_argument("--maks-gambar", type=int, default=30, help="maks gambar disimpan bagi setiap wajah baru")
     m.add_argument("--selang-simpan", type=float, default=5, help="saat antara gambar disimpan bagi wajah sama")
     m.add_argument("--saiz-min", type=int, default=60, help="saiz wajah minimum (piksel) untuk disimpan")
+    m.add_argument("--lebar-kesan", type=int, default=DETECT_WIDTH,
+                   help="lebar gambar semasa mencari wajah. 1280 kesan wajah dari ~60px pada kamera 2K; "
+                        "1920 untuk wajah lebih jauh (lebih CPU); 640 untuk PC lemah. Default 1280")
     m.add_argument("--simpan-hari", type=float, default=14,
                    help="padam wajah baru yang tidak dinamakan selepas N hari. Default 14")
     m.add_argument("--papar", action="store_true", help="tunjuk tetingkap video")
