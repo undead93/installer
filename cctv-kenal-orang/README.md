@@ -266,14 +266,18 @@ boleh bertukar model tanpa perlu mendaftar semula. Model ArcFace InsightFace han
 
 ## Tips ketepatan
 
-**Notifikasi hanya bila pasti.** Notifikasi dihantar hanya bila orang yang sama dikesan sekurang-kurangnya
-**3 kali dalam 4 saat** (`--sahkan`, `--tempoh-sahkan`):
-- Untuk ahli keluarga, purata skor mesti sekurang-kurangnya **0.42** (`--ambang-maklum`).
-- Untuk orang asing, amaran hanya dihantar bila wajah itu jelas bukan ahli keluarga.
+**Notifikasi hanya bila pasti.** Sebelum notifikasi WhatsApp dihantar, sistem menyemak:
+1. Orang yang sama dikesan sekurang-kurangnya **3 kali dalam 4 saat** (`--sahkan`, `--tempoh-sahkan`).
+2. **Purata skor** melepasi had notifikasi (`--ambang-maklum`, iaitu 0.40 untuk ArcFace).
+3. Skor orang itu **jelas lebih tinggi daripada orang berdaftar lain** (`--beza-min 0.06`), supaya adik-beradik yang mirip tidak tertukar.
+4. Sekurang-kurangnya **separuh pengesanan ialah wajah yang jelas**, iaitu menghadap kamera dan ≥ 50px (`--saiz-min-maklum`).
+5. Untuk orang asing: wajah itu tidak hampir padan dengan mana-mana ahli keluarga, dan wajahnya jelas.
+
+Kalau notifikasi tidak dihantar, terminal menerangkan sebabnya, contohnya
+`[maklum] Isteri dikesan tetapi belum pasti: skor 0.37 < 0.40`. Untuk pengesahan paling ketat, guna **`--ketat`**:
+5 pengesanan dalam 6 saat, skor +0.05, dan beza dengan orang lain ≥ 0.10.
 
 Dalam paparan Langsung, kotak **oren** dengan tanda `?` (contohnya `adik?`) bermaksud "mungkin, tetapi belum pasti".
-Log dan kad *Wajah baru* tetap direkod. Untuk orang yang selalu oren pada waktu malam, namakan kad mereka yang
-diambil pada waktu malam supaya sistem kenal wajah mereka dalam mod IR.
 
 **Semua orang dikenali sebagai nama yang sama?** Biasanya ini berlaku kerana ada gambar orang lain, atau gambar yang
 kabur, di bawah nama itu. Dalam tab **Orang berdaftar**, setiap gambar menunjukkan berapa kali ia dipadankan

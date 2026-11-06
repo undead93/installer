@@ -444,6 +444,13 @@ class Stor:
             k[1] += float(s[i_t])
         return nama_t, terbaik
 
+    def beza_kedua(self, f, nama):
+        """Beza skor `nama` dengan orang berdaftar kedua paling serupa (1.0 jika hanya seorang berdaftar)."""
+        s = self.ciri @ f
+        skor = {n: float(np.mean(np.sort(s[idx])[::-1][:2])) for n, idx in self.indeks_nama.items()}
+        lain = [v for n, v in skor.items() if n != nama]
+        return skor.get(nama, 0.0) - max(lain) if lain else 1.0
+
     # ---- kumpulan wajah baru
     def muat_kumpulan(self):
         self.kumpulan = {}
@@ -1618,6 +1625,11 @@ def senarai_kamera(a):
 def cmd_pantau(a):
     enjin = buat_enjin(a.model, a.lebar_kesan)
     isi_ambang_lalai(a, enjin)
+    if a.ketat:
+        a.sahkan, a.tempoh_sahkan = max(a.sahkan, 5), max(a.tempoh_sahkan, 6)
+        a.ambang_maklum, a.beza_min = round(a.ambang_maklum + 0.05, 3), max(a.beza_min, 0.10)
+    print(f"Pengesahan notifikasi: {a.sahkan} pengesanan dalam {a.tempoh_sahkan:g}s, purata skor >= {a.ambang_maklum}, "
+          f"beza dengan orang lain >= {a.beza_min}, separuh wajah jelas (>= {a.saiz_min_maklum}px, menghadap)")
     print(f"Had skor: kenal {a.ambang} | notifikasi {a.ambang_maklum} | kumpul wajah baru {a.ambang_kumpul}")
     stor = Stor(enjin, a.ambang, a.ambang_kumpul, a.maks_gambar, a.selang_simpan, a.saiz_min)
     stor.bersih(a.simpan_hari)
@@ -1702,6 +1714,14 @@ def cmd_pantau(a):
         if k.baris:
             notif.hantar_segera(susun_teks(k.baris, k.masa_dinding, k.asing, kk.nama), k.img, video)
 
+    diag_akhir = {}
+
+    def diag_maklum(kunci, mesej):
+        """Terangkan kenapa notifikasi belum dihantar (maks sekali setiap 30 saat bagi setiap orang)."""
+        if time.time() - diag_akhir.get(kunci, 0) > 30:
+            diag_akhir[kunci] = time.time()
+            print(f"[maklum] {mesej}")
+
     def proses(kk, img):
         kam = kk.kam
         sekarang = time.time()
@@ -1771,21 +1791,36 @@ def cmd_pantau(a):
                     cv2.imwrite(str(TANGKAPAN / f"asing_{datetime.now():%Y%m%d_%H%M%S}_{slug(kk.nama)}.jpg"), img)
 
             # --- pengesahan: notifikasi hanya bila orang yang sama dikesan beberapa kali dengan yakin
+            elok = bool(min(w, h) >= a.saiz_min_maklum and stor._menghadap(face))  # wajah jelas & menghadap
+            beza = stor.beza_kedua(f, nama) if nama is not None else 0.0
             sej = kk.calon.setdefault(kunci, deque())
-            sej.append((sekarang, skor))
+            sej.append((sekarang, skor, elok, beza))
             while sej and sej[0][0] < sekarang - a.tempoh_sahkan:
                 sej.popleft()
             if len(kk.calon) > 200:
                 kk.calon = {k: v for k, v in kk.calon.items() if v and v[-1][0] >= sekarang - a.tempoh_sahkan}
             if len(sej) < a.sahkan:
                 continue
+            bil_elok = sum(1 for _, _, e, _ in sej if e)
+            perlu_elok = -(-a.sahkan // 2)  # sekurang-kurangnya separuh pengesanan mesti wajah yang jelas
             if nama is not None:
-                if float(np.mean([sk for _, sk in sej])) < a.ambang_maklum or not stor.maklum_hidup(nama):
+                if not stor.maklum_hidup(nama):
+                    continue
+                purata = float(np.mean([sk for _, sk, _, _ in sej]))
+                beza_min = min(b for _, _, _, b in sej)
+                sebab = (f"skor {purata:.2f} < {a.ambang_maklum}" if purata < a.ambang_maklum else
+                         f"terlalu mirip orang lain (beza {beza_min:.2f} < {a.beza_min})" if beza_min < a.beza_min else
+                         f"wajah kurang jelas/sisi ({bil_elok}/{len(sej)} jelas)" if bil_elok < perlu_elok else None)
+                if sebab:
+                    diag_maklum(f"{nama}@{kk.nama}", f"{nama} dikesan tetapi belum pasti: {sebab}")
                     continue
                 baris = stor.mesej_untuk(nama)
             else:
-                if a.tanpa_maklum_asing or mungkin or max(sk for _, sk in sej) >= a.ambang - 0.04:
+                if a.tanpa_maklum_asing or mungkin or max(sk for _, sk, _, _ in sej) >= a.ambang - 0.04:
                     continue  # mungkin ahli keluarga dalam keadaan sukar (malam/sisi): jangan beri amaran palsu
+                if bil_elok < perlu_elok:
+                    diag_maklum(f"asing@{kk.nama}", "orang tidak dikenali, tetapi wajah kurang jelas: amaran tidak dihantar")
+                    continue
                 baris = "🆕 Orang baru tidak dikenali" if kid in kk.kad_baru else "⚠️ Orang tidak dikenali"
             if sekarang - kali_maklum.get(kunci, 0) < a.cooldown_maklum:
                 continue
@@ -1915,6 +1950,13 @@ def main():
                    help="saat sebelum notifikasi untuk orang yang sama dihantar semula. Default 600 (10 min)")
     m.add_argument("--tanpa-maklum-asing", action="store_true",
                    help="jangan hantar notifikasi untuk orang tidak dikenali")
+    m.add_argument("--ketat", action="store_true",
+                   help="mod paling ketat: 5 pengesanan dalam 6 saat, skor +0.05, beza dengan orang lain >= 0.10")
+    m.add_argument("--beza-min", type=float, default=0.06,
+                   help="skor orang itu mesti melebihi orang berdaftar kedua paling serupa sekurang-kurangnya ini. "
+                        "Default 0.06")
+    m.add_argument("--saiz-min-maklum", type=int, default=50,
+                   help="saiz wajah minimum (px) untuk dikira 'jelas' semasa pengesahan notifikasi. Default 50")
     m.add_argument("--sahkan", type=int, default=3,
                    help="bilangan pengesanan sebelum notifikasi dihantar. Default 3")
     m.add_argument("--tempoh-sahkan", type=float, default=4,
