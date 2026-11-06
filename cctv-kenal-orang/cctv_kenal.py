@@ -36,6 +36,7 @@ WAJAH_BARU = ROOT / "wajah_baru"  # wajah tidak dikenali, dikumpul ikut orang: w
 LOG_DIR = ROOT / "log"
 TANGKAPAN = ROOT / "tangkapan"    # gambar penuh semasa orang tidak dikenali dikesan
 HALAMAN = ROOT / "halaman.html"
+TETAPAN = ROOT / "tetapan.json"   # siapa yang tidak hantar notifikasi, dll
 
 MODELS = {
     "face_detection_yunet_2023mar.onnx": "models/face_detection_yunet/face_detection_yunet_2023mar.onnx",
@@ -140,6 +141,12 @@ class Stor:
         self.kunci = threading.RLock()
         self.bingkai = None
         self.log_path = None
+        self.notif = None
+        try:
+            self.tetapan = json.loads(TETAPAN.read_text())
+        except (OSError, ValueError):
+            self.tetapan = {}
+        self.tetapan.setdefault("senyap", [])  # orang berdaftar yang TIDAK hantar notifikasi
         ORANG.mkdir(exist_ok=True)
         WAJAH_BARU.mkdir(exist_ok=True)
         self.muat_orang()
@@ -308,6 +315,20 @@ class Stor:
         with self.kunci:
             shutil.rmtree(ORANG / nama, ignore_errors=True)
             self.muat_orang()
+            if nama in self.tetapan["senyap"]:
+                self.set_maklum(nama, True)
+
+    # ---- notifikasi bagi setiap orang
+    def maklum_hidup(self, nama):
+        return nama not in self.tetapan["senyap"]
+
+    def set_maklum(self, nama, hidup):
+        nama = self.semak_nama(nama)
+        with self.kunci:
+            senyap = set(self.tetapan["senyap"])
+            senyap.discard(nama) if hidup else senyap.add(nama)
+            self.tetapan["senyap"] = sorted(senyap)
+            TETAPAN.write_text(json.dumps(self.tetapan, indent=2, ensure_ascii=False))
 
     def tambah_gambar(self, nama, data):
         nama = self.semak_nama(nama)
@@ -351,12 +372,13 @@ class Stor:
             orang = []
             for d in sorted(p for p in ORANG.iterdir() if p.is_dir()):
                 gambar = [{"url": url(p), "rel": str(p.relative_to(ROOT))} for p in senarai_gambar(d)]
-                orang.append({"nama": d.name, "gambar": gambar})
+                orang.append({"nama": d.name, "gambar": gambar, "maklum": self.maklum_hidup(d.name)})
         log = []
         if self.log_path and self.log_path.exists():
             with open(self.log_path, newline="") as fh:
                 log = list(csv.reader(fh))[1:][-200:][::-1]
-        return {"baru": baru, "orang": orang, "log": log}
+        return {"baru": baru, "orang": orang, "log": log,
+                "saluran": self.notif.nama if self.notif else []}
 
     def set_bingkai(self, img):
         self.bingkai = img
@@ -468,6 +490,14 @@ def mula_web(stor, port, kata_laluan):
                     stor.buang_gambar(d.get("rel", ""))
                 elif url.path == "/api/padam-orang":
                     stor.padam_orang(d.get("nama"))
+                elif url.path == "/api/maklum":
+                    stor.set_maklum(d.get("nama"), bool(d.get("hidup")))
+                elif url.path == "/api/uji-maklum":
+                    if not stor.notif or not stor.notif.saluran:
+                        raise ValueError("Tiada saluran notifikasi disetkan (lihat README).")
+                    ralat = stor.notif.hantar_segera("🔔 Ujian notifikasi dari CCTV Kenal Orang", stor.bingkai)
+                    if ralat:
+                        raise ValueError("Gagal: " + "; ".join(ralat))
                 else:
                     return self._json({"ralat": "tiada"}, 404)
                 self._json({"ok": True})
@@ -481,37 +511,119 @@ def mula_web(stor, port, kata_laluan):
 
 
 # ---------------------------------------------------------------- notifikasi
+def _jpg(img):
+    s = 1280 / max(img.shape[:2])
+    if s < 1:
+        img = cv2.resize(img, None, fx=s, fy=s)
+    return cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 85])[1].tobytes()
+
+
+def _post_multipart(url, medan, nama_fail_medan, jpg):
+    b = uuid.uuid4().hex
+    body = b"".join(f"--{b}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n".encode()
+                    for k, v in medan.items())
+    body += (f"--{b}\r\nContent-Disposition: form-data; name=\"{nama_fail_medan}\"; filename=\"cctv.jpg\"\r\n"
+             f"Content-Type: image/jpeg\r\n\r\n").encode() + jpg + f"\r\n--{b}--\r\n".encode()
+    req = urllib.request.Request(url, body, {"Content-Type": f"multipart/form-data; boundary={b}"})
+    return urllib.request.urlopen(req, timeout=30).read()
+
+
+def _post_json(url, obj):
+    req = urllib.request.Request(url, json.dumps(obj).encode(), {"Content-Type": "application/json"})
+    return urllib.request.urlopen(req, timeout=30).read()
+
+
 class Telegram:
+    nama = "Telegram"
+
     def __init__(self):
         self.token = os.environ.get("TELEGRAM_TOKEN")
         self.chat = os.environ.get("TELEGRAM_CHAT_ID")
         self.aktif = bool(self.token and self.chat)
 
-    def hantar(self, teks, img=None):
-        if not self.aktif:
-            return
-        threading.Thread(target=self._hantar, args=(teks, img), daemon=True).start()
+    def hantar(self, teks, img):
+        url = f"https://api.telegram.org/bot{self.token}/"
+        if img is None:
+            _post_json(url + "sendMessage", {"chat_id": self.chat, "text": teks})
+        else:
+            _post_multipart(url + "sendPhoto", {"chat_id": self.chat, "caption": teks}, "photo", _jpg(img))
 
-    def _hantar(self, teks, img):
-        try:
-            url = f"https://api.telegram.org/bot{self.token}/"
+
+class WhatsAppGreenAPI:
+    """WhatsApp dengan gambar melalui Green-API (green-api.com). Nombor anda disambung melalui QR."""
+    nama = "WhatsApp (Green-API)"
+
+    def __init__(self):
+        self.instance = os.environ.get("GREENAPI_INSTANCE")
+        self.token = os.environ.get("GREENAPI_TOKEN")
+        self.base = os.environ.get("GREENAPI_URL", "https://api.green-api.com").rstrip("/")
+        self.ke = [self._chat_id(x) for x in os.environ.get("WHATSAPP_KE", "").split(",") if x.strip()]
+        self.aktif = bool(self.instance and self.token and self.ke)
+
+    @staticmethod
+    def _chat_id(x):
+        x = x.strip()
+        if "@" in x:
+            return x  # contoh kumpulan: 120363012345678901@g.us
+        x = re.sub(r"\D", "", x)
+        if x.startswith("0"):
+            x = "6" + x  # 0123456789 -> 60123456789 (Malaysia)
+        return x + "@c.us"
+
+    def hantar(self, teks, img):
+        url = f"{self.base}/waInstance{self.instance}/"
+        for chat in self.ke:
             if img is None:
-                data = json.dumps({"chat_id": self.chat, "text": teks}).encode()
-                req = urllib.request.Request(url + "sendMessage", data, {"Content-Type": "application/json"})
+                _post_json(url + f"sendMessage/{self.token}", {"chatId": chat, "message": teks})
             else:
-                jpg = cv2.imencode(".jpg", img)[1]
-                b = uuid.uuid4().hex
-                body = (
-                    f"--{b}\r\nContent-Disposition: form-data; name=\"chat_id\"\r\n\r\n{self.chat}\r\n"
-                    f"--{b}\r\nContent-Disposition: form-data; name=\"caption\"\r\n\r\n{teks}\r\n"
-                    f"--{b}\r\nContent-Disposition: form-data; name=\"photo\"; filename=\"cctv.jpg\"\r\n"
-                    f"Content-Type: image/jpeg\r\n\r\n"
-                ).encode() + jpg.tobytes() + f"\r\n--{b}--\r\n".encode()
-                req = urllib.request.Request(url + "sendPhoto", body,
-                                             {"Content-Type": f"multipart/form-data; boundary={b}"})
-            urllib.request.urlopen(req, timeout=15).read()
-        except Exception as e:
-            print(f"[telegram] gagal: {e}")
+                _post_multipart(url + f"sendFileByUpload/{self.token}", {"chatId": chat, "caption": teks},
+                                "file", _jpg(img))
+
+
+class WhatsAppCallMeBot:
+    """WhatsApp teks sahaja melalui CallMeBot (percuma, hanya ke nombor yang mendaftar)."""
+    nama = "WhatsApp (CallMeBot)"
+    URL = "https://api.callmebot.com/whatsapp.php"
+
+    def __init__(self):
+        self.penerima = []  # [(nombor, apikey)]
+        for x in os.environ.get("CALLMEBOT", "").split(","):
+            if ":" in x:
+                no, key = x.split(":", 1)
+                no = re.sub(r"\D", "", no)
+                self.penerima.append(("6" + no if no.startswith("0") else no, key.strip()))
+        self.aktif = bool(self.penerima)
+
+    def hantar(self, teks, img):
+        for no, key in self.penerima:
+            q = urllib.parse.urlencode({"phone": "+" + no, "text": teks, "apikey": key})
+            jawapan = urllib.request.urlopen(f"{self.URL}?{q}", timeout=30).read().decode(errors="ignore")
+            if "ERROR" in jawapan.upper() and "MESSAGE QUEUED" not in jawapan.upper():
+                raise RuntimeError(re.sub(r"<[^>]+>", " ", jawapan).strip()[:200])
+
+
+class Notifikasi:
+    def __init__(self):
+        self.saluran = [s for s in (Telegram(), WhatsAppGreenAPI(), WhatsAppCallMeBot()) if s.aktif]
+
+    @property
+    def nama(self):
+        return [s.nama for s in self.saluran]
+
+    def hantar_segera(self, teks, img=None):
+        """Hantar ke semua saluran sekarang. -> senarai ralat"""
+        ralat = []
+        for s in self.saluran:
+            try:
+                s.hantar(teks, img)
+            except Exception as e:
+                print(f"[{s.nama}] gagal: {e}")
+                ralat.append(f"{s.nama}: {e}")
+        return ralat
+
+    def hantar(self, teks, img=None):
+        if self.saluran:
+            threading.Thread(target=self.hantar_segera, args=(teks, img), daemon=True).start()
 
 
 # ---------------------------------------------------------------- kamera
@@ -590,10 +702,14 @@ def cmd_pantau(a):
     if a.port:
         pautan = mula_web(stor, a.port, a.kata_laluan)
         print(f"Page web: {pautan}  (buka dari telefon/komputer dalam WiFi yang sama)")
-    tg = Telegram()
-    print("Telegram:", "aktif" if tg.aktif else "tidak aktif (set TELEGRAM_TOKEN & TELEGRAM_CHAT_ID)")
+    notif = Notifikasi()
+    stor.notif = notif
+    print("Notifikasi:", ", ".join(notif.nama) or "tiada (lihat README: WhatsApp / Telegram)")
+    senyap = stor.tetapan["senyap"]
+    print("Orang yang tidak hantar notifikasi:", ", ".join(senyap) if senyap else "-")
 
-    kali_akhir = {}  # kunci -> masa terakhir dilog/notifikasi (untuk cooldown)
+    kali_akhir = {}  # kunci -> masa terakhir dilog (untuk cooldown)
+    kali_maklum = {}  # kunci -> masa terakhir notifikasi dihantar
     kam = Kamera(a.sumber)
     penulis = None
     t_proses = t_bersih = 0.0
@@ -633,16 +749,23 @@ def cmd_pantau(a):
                     continue
                 kali_akhir[kunci] = sekarang
                 masa = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                masa_pendek = datetime.now().strftime("%d/%m %I:%M %p")
                 log.writerow([masa, nama or "TIDAK DIKENALI", f"{skor:.3f}", kid or ""])
                 log_f.flush()
                 print(f"{masa}  {label:<22} skor={skor:.2f}")
                 if nama is None:
                     cv2.imwrite(str(TANGKAPAN / f"asing_{datetime.now():%Y%m%d_%H%M%S}.jpg"), img)
+                if sekarang - kali_maklum.get(kunci, 0) < a.cooldown_maklum and not kumpulan_baru:
+                    continue
+                if nama is None and not a.tanpa_maklum_asing:
                     teks = ("🆕 Orang baru tidak dikenali" if kumpulan_baru else "⚠️ Orang tidak dikenali")
-                    teks += f" ({masa})" + (f"\nNamakan di {pautan}" if pautan else "")
-                    tg.hantar(teks, img)
-                elif a.maklum_dikenali:
-                    tg.hantar(f"✅ {nama} dikesan ({masa})", img)
+                    teks += f"\n🕒 {masa_pendek}" + (f"\nNamakan di {pautan}" if pautan else "")
+                elif nama is not None and stor.maklum_hidup(nama):
+                    teks = f"✅ {nama} dikesan di kamera\n🕒 {masa_pendek}"
+                else:
+                    continue
+                kali_maklum[kunci] = sekarang
+                notif.hantar(teks, img)
 
             stor.set_bingkai(img)
             if a.rakam:
@@ -695,8 +818,10 @@ def main():
                    help="padam wajah baru yang tidak dinamakan selepas N hari. Default 14")
     m.add_argument("--papar", action="store_true", help="tunjuk tetingkap video")
     m.add_argument("--rakam", help="simpan video berlabel ke fail .mp4")
-    m.add_argument("--maklum-dikenali", action="store_true",
-                   help="hantar Telegram juga untuk orang yang dikenali")
+    m.add_argument("--cooldown-maklum", type=float, default=600,
+                   help="saat sebelum notifikasi untuk orang yang sama dihantar semula. Default 600 (10 min)")
+    m.add_argument("--tanpa-maklum-asing", action="store_true",
+                   help="jangan hantar notifikasi untuk orang tidak dikenali")
     m.add_argument("--kekal", action="store_true", help=argparse.SUPPRESS)  # untuk ujian dengan fail video
     m.set_defaults(fn=cmd_pantau)
 

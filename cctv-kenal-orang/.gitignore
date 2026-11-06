@@ -6,3 +6,5 @@ orang/*/
 pangkalan.npz
 *.mp4
 __pycache__/
+tetapan.json
+tetapan.sh

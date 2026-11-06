@@ -27,6 +27,7 @@
   nav button.aktif { color: var(--teks); border-color: var(--utama); font-weight: 600; }
   .bil { display: inline-block; min-width: 20px; padding: 0 6px; margin-left: 4px; border-radius: 10px;
          background: var(--bahaya); color: #fff; font-size: 12px; line-height: 18px; text-align: center; }
+  .bil[hidden] { display: none; }
   main { max-width: 960px; margin: 0 auto; padding: 16px; }
   .kad { background: var(--kad); border: 1px solid var(--garis); border-radius: 12px; padding: 14px; margin-bottom: 14px; }
   .atas { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 10px; }
@@ -62,6 +63,15 @@
            transition: opacity .2s; pointer-events: none; max-width: calc(100% - 32px); }
   #toast.tunjuk { opacity: 1; }
   .fail-input { display: none; }
+  .suis { display: flex; align-items: center; gap: 10px; margin-top: 12px; cursor: pointer; user-select: none; }
+  .suis input { appearance: none; width: 44px; height: 26px; border-radius: 13px; background: var(--garis);
+                position: relative; cursor: pointer; flex: none; margin: 0; transition: background .15s; }
+  .suis input::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px;
+                       border-radius: 50%; background: #fff; transition: left .15s; box-shadow: 0 1px 2px rgba(0,0,0,.3); }
+  .suis input:checked { background: var(--ok); }
+  .suis input:checked::after { left: 21px; }
+  .status { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .status .btn { padding: 6px 12px; font-size: 14px; }
 </style>
 </head>
 <body>
@@ -85,6 +95,10 @@
   </section>
 
   <section id="t-orang" hidden>
+    <div class="kad status">
+      <div><b>Notifikasi</b><div class="pudar" id="saluran">-</div></div>
+      <button class="btn" id="btn-uji">Hantar ujian</button>
+    </div>
     <div class="kad">
       <b>Tambah orang dari gambar telefon</b>
       <div class="baris">
@@ -148,6 +162,10 @@ function lukis() {
   const b = $('#bil-baru');
   b.hidden = !data.baru.length; b.textContent = data.baru.length;
   $('#senarai-nama').innerHTML = data.orang.map(o => `<option value="${esc(o.nama)}">`).join('');
+  $('#saluran').textContent = data.saluran && data.saluran.length
+    ? 'Aktif: ' + data.saluran.join(', ')
+    : 'Belum disetkan. Lihat README untuk sambung WhatsApp.';
+  $('#btn-uji').disabled = !(data.saluran && data.saluran.length);
   lukisBaru(); lukisOrang(); lukisLog();
 }
 
@@ -183,6 +201,8 @@ function lukisOrang() {
       <div class="atas"><b>${esc(o.nama)}</b><span class="pudar">${o.gambar.length} gambar</span></div>
       <div class="grid">${o.gambar.map(g => `<button class="gmb" data-rel="${esc(g.rel)}" title="Ketik untuk padam">
           <img loading="lazy" src="${g.url}" alt=""></button>`).join('')}</div>
+      <label class="suis"><input type="checkbox" class="maklum" ${o.maklum ? 'checked' : ''}>
+        <span>Hantar notifikasi bila ${esc(o.nama)} dikesan</span></label>
       <div class="baris">
         <button class="btn" data-tindakan="tambah">Tambah gambar</button>
         <button class="btn bahaya" data-tindakan="padam">Padam orang</button>
@@ -281,7 +301,21 @@ $('#senarai-orang').addEventListener('click', async e => {
     }
   } catch (err) { toast(err.message); }
 });
+$('#btn-uji').onclick = async () => {
+  const b = $('#btn-uji'); b.disabled = true; b.textContent = 'Menghantar...';
+  try { await post('/api/uji-maklum', {}); toast('Ujian dihantar. Semak WhatsApp anda.'); }
+  catch (err) { toast(err.message); }
+  b.disabled = false; b.textContent = 'Hantar ujian';
+};
 $('#senarai-orang').addEventListener('change', async e => {
+  if (e.target.matches('input.maklum')) {
+    const nama = e.target.closest('.kad').dataset.nama, hidup = e.target.checked;
+    try { await post('/api/maklum', { nama, hidup });
+          toast(hidup ? `Notifikasi untuk ${nama} dihidupkan` : `Notifikasi untuk ${nama} dimatikan`); }
+    catch (err) { toast(err.message); e.target.checked = !hidup; }
+    e.target.blur();
+    return;
+  }
   if (!e.target.matches('input[type=file]')) return;
   await muatNaik(e.target.closest('.kad').dataset.nama, [...e.target.files]);
 });

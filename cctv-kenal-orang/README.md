@@ -74,17 +74,68 @@ URL RTSP jenama lain:
 | `log/YYYY-MM-DD.csv` | Rekod masa, nama dan skor. Boleh dijadikan rekod kehadiran. |
 | `tangkapan/` | Gambar penuh semasa orang tidak dikenali dikesan. |
 
-## Notifikasi Telegram (pilihan)
+## Notifikasi WhatsApp
+
+Bila **orang berdaftar** dikesan, sistem hantar mesej WhatsApp seperti ini:
+
+    ✅ Ali dikesan di kamera
+    🕒 06/11 10:32 AM
+
+Sistem juga hantar mesej bila **orang tidak dikenali** dikesan, bersama pautan ke page web untuk namakan orang itu.
+
+- Dalam tab **Orang berdaftar**, setiap orang ada suis *Hantar notifikasi*. Matikan suis untuk orang yang anda tak perlu dimaklumkan.
+- Untuk orang yang sama, notifikasi hanya dihantar sekali setiap 10 minit. Ubah dengan `--cooldown-maklum 1800` (30 minit).
+- Untuk tutup notifikasi orang tidak dikenali, guna `--tanpa-maklum-asing`.
+- Butang **Hantar ujian** dalam page web akan hantar mesej ujian untuk memastikan semuanya berfungsi.
+
+Pilih **satu** daripada dua cara di bawah.
+
+### Cara A: Green-API (dengan gambar) – disyorkan
+
+Green-API menyambung nombor WhatsApp anda melalui QR, sama macam WhatsApp Web. Mesej dihantar **dari nombor itu**,
+jadi guna nombor kedua (contohnya nombor prepaid lama) sebagai "nombor CCTV". Penerima boleh nombor anda sendiri
+atau satu kumpulan WhatsApp keluarga.
+
+1. Daftar di **green-api.com** dan buat *instance* (ada pelan percuma *Developer*).
+2. Dalam console, imbas QR dengan WhatsApp nombor CCTV (Peranti Dipautkan, kemudian Pautkan Peranti).
+3. Salin **idInstance**, **apiTokenInstance** dan **apiUrl** dari console.
+4. Sebelum jalankan sistem, set:
+
+       export GREENAPI_INSTANCE="7103123456"
+       export GREENAPI_TOKEN="abc123..."
+       export GREENAPI_URL="https://7103.api.greenapi.com"     # apiUrl dari console
+       export WHATSAPP_KE="0123456789,0198765432"             # nombor penerima, dipisah koma
+
+   Untuk hantar ke kumpulan WhatsApp, letak ID kumpulan (contohnya `120363012345678901@g.us`) dalam `WHATSAPP_KE`.
+   ID kumpulan boleh didapati dalam console Green-API (getChats).
+
+Green-API bukan servis rasmi WhatsApp. Gunakan nombor kedua, bukan nombor utama anda.
+
+### Cara B: CallMeBot (percuma, teks sahaja)
+
+Cara ini paling mudah, tetapi **tiada gambar**, dan mesej hanya boleh dihantar ke nombor yang mendaftar sendiri.
+
+1. Buka **callmebot.com**, pergi ke bahagian *WhatsApp API*, dan simpan nombor bot yang tertera dalam kenalan telefon. Nombor ini pernah bertukar, jadi sentiasa ambil dari laman itu.
+2. Hantar mesej WhatsApp `I allow callmebot to send me messages` ke nombor itu.
+3. Anda akan terima **apikey**. Kemudian set:
+
+       export CALLMEBOT="0123456789:123456"
+
+   Untuk beberapa penerima, setiap seorang perlu buat langkah 1–2. Kemudian set: `CALLMEBOT="0123456789:111111,0198765432:222222"`
+
+### Telegram (pilihan)
 
 1. Cari **@BotFather** dalam Telegram, hantar `/newbot` dan salin token yang diberi.
 2. Hantar apa-apa mesej kepada bot anda, kemudian buka `https://api.telegram.org/bot<TOKEN>/getUpdates` dan salin `chat.id`.
-3. Jalankan:
+3. Set `export TELEGRAM_TOKEN="123456:ABC..."` dan `export TELEGRAM_CHAT_ID="987654321"`.
 
-       export TELEGRAM_TOKEN="123456:ABC..."
-       export TELEGRAM_CHAT_ID="987654321"
+Anda boleh hidupkan WhatsApp dan Telegram serentak. Setiap notifikasi akan dihantar ke semua saluran yang disetkan.
 
-Anda akan terima gambar dan pautan ke page web setiap kali orang tidak dikenali dikesan.
-Tambah `--maklum-dikenali` untuk terima notifikasi bagi orang yang dikenali juga.
+### Simpan tetapan supaya tak perlu taip setiap kali
+
+Simpan semua baris `export` dalam fail `tetapan.sh`, kemudian jalankan:
+
+    source tetapan.sh && python3 cctv_kenal.py pantau --sumber "rtsp://..."
 
 ## Tetapan berguna
 
