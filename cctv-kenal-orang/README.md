@@ -49,6 +49,20 @@ Untuk letak kata laluan pada page web:
 
 Untuk tutup page web, guna `--port 0`.
 
+## Dua kamera atau lebih
+
+Gunakan `--kamera "Nama=URL"` untuk setiap kamera, menggantikan `--sumber`:
+
+    python cctv_kenal.py pantau --kamera "Pintu Depan=rtsp://user:pass@192.168.0.106:554/stream1" --kamera "Pagar=rtsp://user:pass@192.168.0.108:554/stream1"
+
+Dalam `mula.bat`, tulis semuanya dalam **satu baris**.
+
+- Mesej WhatsApp menyebut kamera mana: `📍 Pagar`. Klip video diambil dari kamera itu.
+- Notifikasi untuk orang yang sama hanya dihantar **sekali** dalam tempoh cooldown, walaupun dia dikesan oleh kedua-dua kamera.
+- Dalam page web, tab **Langsung** ada butang untuk pilih kamera. Log dan klip menunjukkan nama kamera.
+- Untuk kurangkan beban CPU, kenal wajah dari `stream2` dan rakam HD dari `stream1`:
+  `--kamera "Pagar=rtsp://.../stream2|rtsp://.../stream1"` (kenal|rakam).
+
 ## Guna di Windows
 
 Sistem ini juga berjalan di Windows 10/11, jadi anda boleh cuba dulu sebelum pindah ke Mac.

@@ -87,6 +87,13 @@
   .klip-grid video { width: 100%; border-radius: 8px; background: #000; display: block; aspect-ratio: 16 / 9; }
   .klip-grid .label { margin-top: 8px; font-weight: 600; }
   h2 { font-size: 15px; margin: 4px 0 10px; }
+  .pilih-kamera { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+  .pilih-kamera[hidden] { display: none; }
+  .pilih-kamera button { border: 1px solid var(--garis); background: var(--kad); color: var(--teks);
+                         padding: 8px 14px; border-radius: 20px; font: inherit; cursor: pointer; }
+  .pilih-kamera button.aktif { background: var(--utama); border-color: var(--utama); color: var(--utama-teks); }
+  .kamera-tag { display: inline-block; font-size: 12px; color: var(--pudar); border: 1px solid var(--garis);
+                border-radius: 10px; padding: 0 7px; margin-left: 4px; }
   .wa img { display: block; width: 220px; max-width: 100%; margin: 10px 0 6px; border-radius: 8px; background: #fff; padding: 6px; }
   .titik { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--pudar); }
   .titik.ok { background: var(--ok); } .titik.amaran { background: #f59e0b; }
@@ -134,11 +141,12 @@
     <h2>Klip video</h2>
     <div class="klip-grid" id="senarai-klip"></div>
     <h2>Log hari ini</h2>
-    <div class="kad"><table><thead><tr><th>Masa</th><th>Nama</th><th>Skor</th></tr></thead>
+    <div class="kad"><table><thead><tr><th>Masa</th><th>Nama</th><th>Skor</th><th id="th-kamera" hidden>Kamera</th></tr></thead>
       <tbody id="isi-log"></tbody></table></div>
   </section>
 
   <section id="t-langsung" hidden>
+    <div class="pilih-kamera" id="pilih-kamera" hidden></div>
     <img id="strim" alt="Video langsung dari kamera">
     <p class="bantu" style="margin-top:10px">Video dengan label nama, dikemas kini beberapa kali sesaat.</p>
   </section>
@@ -284,18 +292,43 @@ function lukisKlip() {
   klipTerakhir = kunci;
   $('#senarai-klip').innerHTML = (data.klip || []).length
     ? data.klip.map(k => `<div class="kad"><video controls playsinline preload="metadata" src="${k.url}#t=0.1"></video>
-        <div class="label">${esc(k.label)}</div><div class="pudar">${esc(k.masa)}</div></div>`).join('')
+        <div class="label">${esc(k.label)}${k.kamera ? `<span class="kamera-tag">📍 ${esc(k.kamera)}</span>` : ''}</div>
+        <div class="pudar">${esc(k.masa)}</div></div>`).join('')
     : '<div class="pudar">Belum ada klip. Klip dirakam bila orang dikesan dan notifikasi dihantar.</div>';
 }
 
 function lukisLog() {
   lukisKlip();
+  const banyak = (data.kamera || []).length > 1;
+  $('#th-kamera').hidden = !banyak;
   $('#isi-log').innerHTML = data.log.length
     ? data.log.map(r => `<tr><td>${esc(r[0].slice(11))}</td>
         <td class="${r[1] === 'TIDAK DIKENALI' ? 'asing' : ''}">${esc(r[1])}${r[3] ? ' #' + esc(r[3].slice(-4)) : ''}</td>
-        <td>${esc(r[2])}</td></tr>`).join('')
-    : '<tr><td colspan="3" class="pudar">Belum ada rekod hari ini.</td></tr>';
+        <td>${esc(r[2])}</td>${banyak ? `<td>${esc(r[4] || '')}</td>` : ''}</tr>`).join('')
+    : `<tr><td colspan="4" class="pudar">Belum ada rekod hari ini.</td></tr>`;
+  lukisPilihKamera();
 }
+
+let kameraLangsung = null;
+function lukisPilihKamera() {
+  const senarai = data.kamera || [];
+  const el = $('#pilih-kamera');
+  el.hidden = senarai.length < 2;
+  if (!senarai.includes(kameraLangsung)) kameraLangsung = senarai[0] || null;
+  const kunci = senarai.join('|') + '#' + kameraLangsung;
+  if (el.dataset.kunci === kunci) return;
+  el.dataset.kunci = kunci;
+  el.innerHTML = senarai.map(n => `<button data-kamera="${esc(n)}" class="${n === kameraLangsung ? 'aktif' : ''}">📍 ${esc(n)}</button>`).join('');
+}
+function mulaStrim() {
+  $('#strim').src = tab === 'langsung'
+    ? '/strim?' + (kameraLangsung ? 'k=' + encodeURIComponent(kameraLangsung) + '&' : '') + 't=' + Date.now() : '';
+}
+$('#pilih-kamera').addEventListener('click', e => {
+  const b = e.target.closest('[data-kamera]'); if (!b) return;
+  kameraLangsung = b.dataset.kamera;
+  lukisPilihKamera(); mulaStrim();
+});
 
 async function muatNaik(nama, fail) {
   if (!nama.trim()) { toast('Taip nama dahulu'); return; }
@@ -313,7 +346,7 @@ document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
   tab = b.dataset.tab;
   document.querySelectorAll('nav button').forEach(x => x.classList.toggle('aktif', x === b));
   document.querySelectorAll('main > section').forEach(s => s.hidden = s.id !== 't-' + tab);
-  $('#strim').src = tab === 'langsung' ? '/strim?' + Date.now() : '';
+  mulaStrim();
 });
 
 // ---- wajah baru
