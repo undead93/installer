@@ -229,6 +229,15 @@ Simpan semua baris `export` dalam fail `tetapan.sh`, kemudian jalankan:
 
 ## Tips ketepatan
 
+**Notifikasi hanya bila pasti.** Notifikasi dihantar hanya bila orang yang sama dikesan sekurang-kurangnya
+**3 kali dalam 4 saat** (`--sahkan`, `--tempoh-sahkan`):
+- Untuk ahli keluarga, purata skor mesti sekurang-kurangnya **0.42** (`--ambang-maklum`).
+- Untuk orang asing, amaran hanya dihantar bila wajah itu jelas bukan ahli keluarga.
+
+Dalam paparan Langsung, kotak **oren** dengan tanda `?` (contohnya `adik?`) bermaksud "mungkin, tetapi belum pasti".
+Log dan kad *Wajah baru* tetap direkod. Untuk orang yang selalu oren pada waktu malam, namakan kad mereka yang
+diambil pada waktu malam supaya sistem kenal wajah mereka dalam mod IR.
+
 **Semua orang dikenali sebagai nama yang sama?** Biasanya ini berlaku kerana ada gambar orang lain, atau gambar yang
 kabur, di bawah nama itu. Dalam tab **Orang berdaftar**, setiap gambar menunjukkan berapa kali ia dipadankan
 (contohnya `12×`). Gambar yang padan dengan kebanyakan orang dengan skor rendah ditanda **⚠️**. Ketik gambar itu

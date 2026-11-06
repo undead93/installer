@@ -387,8 +387,9 @@ class Stor:
     @staticmethod
     def _potong(img, x, y, w, h):
         H, W = img.shape[:2]
-        x0, y0 = int(max(0, x - 0.5 * w)), int(max(0, y - 0.6 * h))
-        x1, y1 = int(min(W, x + 1.5 * w)), int(min(H, y + 1.5 * h))
+        # potong rapat pada muka (sedikit ruang di sekeliling), bukan bahu/latar belakang
+        x0, y0 = int(max(0, x - 0.25 * w)), int(max(0, y - 0.3 * h))
+        x1, y1 = int(min(W, x + 1.25 * w)), int(min(H, y + 1.2 * h))
         crop = img[y0:y1, x0:x1]
         if crop.size == 0:
             return None
@@ -1249,6 +1250,8 @@ class KonteksKamera:
         self.klip_semasa = None
         self.t_proses = 0.0
         self.penulis = None
+        self.calon = {}        # kunci -> deque[(masa, skor)]: pengesanan terkini sebelum disahkan
+        self.kad_baru = set()  # kad orang asing yang baru dicipta (untuk label 🆕)
 
 
 def senarai_kamera(a):
@@ -1360,42 +1363,66 @@ def cmd_pantau(a):
         for face in enjin.kesan(img):
             f = enjin.ciri(img, face)
             nama, skor, kid = stor.kenal(f)
-            kumpulan_baru = False
+            mungkin = None  # orang asing yang hampir padan dengan ahli keluarga (belum pasti)
             if nama is None:
                 kid, kumpulan_baru = stor.rekod_asing(img, face, f, kid, sekarang)
-                label = "TIDAK DIKENALI" + (f" #{kid[-4:]}" if kid else "")
+                if kumpulan_baru:
+                    kk.kad_baru.add(kid)
                 kunci = f"asing:{kid}"
+                hampir, s_hampir = stor.padan_orang(f)
+                if hampir and s_hampir >= a.ambang - 0.04:
+                    mungkin = hampir
+                label = f"{mungkin}?" if mungkin else "TIDAK DIKENALI" + (f" #{kid[-4:]}" if kid else "")
+                label_log = "TIDAK DIKENALI" + (f" #{kid[-4:]}" if kid else "") + (f" (mungkin {mungkin})" if mungkin else "")
+                warna = (0, 165, 255) if mungkin else (0, 0, 255)
             else:
-                label, kunci = nama, nama
+                kunci = nama
+                pasti = skor >= a.ambang_maklum
+                label = nama if pasti else f"{nama}?"
+                label_log = label
+                warna = (0, 200, 0) if pasti else (0, 165, 255)  # oren = dikenali tetapi belum pasti
             x, y, w, h = face[:4].astype(int)
-            warna = (0, 200, 0) if nama else (0, 0, 255)
             cv2.rectangle(img, (x, y), (x + w, y + h), warna, 2)
             cv2.putText(img, f"{label} {skor:.2f}", (x, max(0, y - 8)),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, warna, 2)
             kotak.append((x, y, w, h, label, warna))
 
-            if sekarang - kali_akhir.get(f"{kunci}@{kk.nama}", 0) < a.cooldown:
+            # --- log (sekali setiap --cooldown saat bagi setiap orang, setiap kamera)
+            if sekarang - kali_akhir.get(f"{kunci}@{kk.nama}", 0) >= a.cooldown:
+                kali_akhir[f"{kunci}@{kk.nama}"] = sekarang
+                masa = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                log.writerow([masa, nama or "TIDAK DIKENALI", f"{skor:.3f}", kid or "", kk.nama])
+                log_f.flush()
+                print(f"{masa}  {label_log:<22} skor={skor:.2f}" + (f"  [{kk.nama}]" if banyak else ""))
+                if nama is None:
+                    cv2.imwrite(str(TANGKAPAN / f"asing_{datetime.now():%Y%m%d_%H%M%S}_{slug(kk.nama)}.jpg"), img)
+
+            # --- pengesahan: notifikasi hanya bila orang yang sama dikesan beberapa kali dengan yakin
+            sej = kk.calon.setdefault(kunci, deque())
+            sej.append((sekarang, skor))
+            while sej and sej[0][0] < sekarang - a.tempoh_sahkan:
+                sej.popleft()
+            if len(kk.calon) > 200:
+                kk.calon = {k: v for k, v in kk.calon.items() if v and v[-1][0] >= sekarang - a.tempoh_sahkan}
+            if len(sej) < a.sahkan:
                 continue
-            kali_akhir[f"{kunci}@{kk.nama}"] = sekarang
-            masa = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            log.writerow([masa, nama or "TIDAK DIKENALI", f"{skor:.3f}", kid or "", kk.nama])
-            log_f.flush()
-            print(f"{masa}  {label:<22} skor={skor:.2f}" + (f"  [{kk.nama}]" if banyak else ""))
-            if nama is None:
-                cv2.imwrite(str(TANGKAPAN / f"asing_{datetime.now():%Y%m%d_%H%M%S}_{slug(kk.nama)}.jpg"), img)
-            if sekarang - kali_maklum.get(kunci, 0) < a.cooldown_maklum and not kumpulan_baru:
-                continue
-            if nama is None and not a.tanpa_maklum_asing:
-                baris = "🆕 Orang baru tidak dikenali" if kumpulan_baru else "⚠️ Orang tidak dikenali"
-            elif nama is not None and stor.maklum_hidup(nama):
+            if nama is not None:
+                if float(np.mean([sk for _, sk in sej])) < a.ambang_maklum or not stor.maklum_hidup(nama):
+                    continue
                 baris = stor.mesej_untuk(nama)
             else:
+                if a.tanpa_maklum_asing or mungkin or max(sk for _, sk in sej) >= a.ambang - 0.04:
+                    continue  # mungkin ahli keluarga dalam keadaan sukar (malam/sisi): jangan beri amaran palsu
+                baris = "🆕 Orang baru tidak dikenali" if kid in kk.kad_baru else "⚠️ Orang tidak dikenali"
+            if sekarang - kali_maklum.get(kunci, 0) < a.cooldown_maklum:
                 continue
             kali_maklum[kunci] = sekarang
+            sej.clear()
+            kk.kad_baru.discard(kid)
             if not guna_video:
                 notif.hantar(susun_teks([baris], sekarang, nama is None, kk.nama), img)
                 continue
-            # gabungkan orang yang dikesan dalam 3 saat yang sama (kamera sama) ke dalam satu klip
+            # gabungkan orang yang disahkan dalam 3 saat yang sama (kamera sama) ke dalam satu klip
             k = kk.klip_semasa
             if k is None or k.siap.is_set() or kam.masa - k.t_mula > 3:
                 k = Klip([], kam.masa, kam.masa + a.klip_selepas) if kk.perakam \
@@ -1507,6 +1534,13 @@ def main():
                    help="saat sebelum notifikasi untuk orang yang sama dihantar semula. Default 600 (10 min)")
     m.add_argument("--tanpa-maklum-asing", action="store_true",
                    help="jangan hantar notifikasi untuk orang tidak dikenali")
+    m.add_argument("--sahkan", type=int, default=3,
+                   help="bilangan pengesanan sebelum notifikasi dihantar. Default 3")
+    m.add_argument("--tempoh-sahkan", type=float, default=4,
+                   help="dalam berapa saat pengesanan itu mesti berlaku. Default 4")
+    m.add_argument("--ambang-maklum", type=float, default=0.42,
+                   help="purata skor minimum untuk hantar notifikasi ahli keluarga (lebih ketat dari --ambang). "
+                        "Default 0.42")
     m.add_argument("--tanpa-video", action="store_true", help="hantar gambar sahaja, tanpa klip video")
     m.add_argument("--klip-sebelum", type=float, default=3, help="saat video sebelum orang dikesan. Default 3")
     m.add_argument("--klip-selepas", type=float, default=5, help="saat video selepas orang dikesan. Default 5")
