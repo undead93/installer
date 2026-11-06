@@ -280,6 +280,7 @@ function lukisOrang() {
       </div>
       <div class="baris">
         <button class="btn" data-tindakan="tambah">Tambah gambar</button>
+        <button class="btn" data-tindakan="tukar">Tukar nama</button>
         <button class="btn bahaya" data-tindakan="padam">Padam orang</button>
         <input type="file" class="fail-input" accept="image/*" multiple>
       </div></div>`).join('');
@@ -361,15 +362,15 @@ $('#senarai-baru').addEventListener('click', async e => {
     return;
   }
   const cad = e.target.closest('[data-cadang]');
-  if (cad) { kad.querySelector('input').value = cad.dataset.cadang; kad.querySelector('input').focus(); return; }
+  if (cad) { kad.querySelector('input[type=text]').value = cad.dataset.cadang; kad.querySelector('input[type=text]').focus(); return; }
   const t = e.target.closest('[data-tindakan]'); if (!t) return;
   try {
     if (t.dataset.tindakan === 'simpan') {
-      const nama = kad.querySelector('input').value.trim();
-      if (!nama) { toast('Taip nama dahulu'); kad.querySelector('input').focus(); return; }
+      const nama = kad.querySelector('input[type=text]').value.trim();
+      if (!nama) { toast('Taip nama dahulu'); kad.querySelector('input[type=text]').focus(); return; }
       t.disabled = true;
       await post('/api/label', { id, nama, keluarkan: [...(keluar[id] || [])] });
-      kad.querySelector('input').value = '';
+      kad.querySelector('input[type=text]').value = '';
       toast(`Disimpan sebagai ${nama}. Sistem akan kenal orang ini mulai sekarang.`);
     } else {
       if (!confirm('Buang semua gambar orang ini?')) return;
@@ -429,6 +430,13 @@ $('#senarai-orang').addEventListener('click', async e => {
       await post('/api/mesej', { nama, mesej });
       document.activeElement && document.activeElement.blur();
       toast(mesej ? `Mesej disimpan: "${mesej}"` : 'Mesej dikembalikan ke asal');
+      return muat(true);
+    }
+    if (t.dataset.tindakan === 'tukar') {
+      const baru = (prompt(`Nama baru untuk ${nama}:`, nama) || '').trim();
+      if (!baru || baru === nama) return;
+      await post('/api/tukar-nama', { nama, baru });
+      toast(`${nama} kini bernama ${baru}`);
       return muat(true);
     }
     if (t.dataset.tindakan === 'padam') {

@@ -443,6 +443,33 @@ class Stor:
                 if k is not None and not k["fail"]:
                     self.buang_kumpulan(p.parent.name)
 
+    def tukar_nama(self, lama, baru):
+        """Tukar nama orang berdaftar. Jika nama baru sudah wujud, gambar digabung ke dalamnya."""
+        lama, baru = self.semak_nama(lama), self.semak_nama(baru)
+        if lama == baru:
+            return
+        with self.kunci:
+            sumber, sasaran = ORANG / lama, ORANG / baru
+            if not sumber.is_dir():
+                raise ValueError(f"{lama} tidak dijumpai.")
+            if sasaran.is_dir():
+                for f in sumber.iterdir():
+                    dest = sasaran / f.name
+                    if dest.exists():
+                        dest = sasaran / f"{lama}_{f.name}"
+                    shutil.move(str(f), dest)
+                shutil.rmtree(sumber, ignore_errors=True)
+            else:
+                sumber.rename(sasaran)
+            t = self.tetapan
+            if lama in t["mesej"]:
+                m = t["mesej"].pop(lama)
+                t["mesej"].setdefault(baru, m.replace(lama, baru))
+            if lama in t["senyap"]:
+                t["senyap"] = sorted((set(t["senyap"]) - {lama}) | {baru})
+            self._simpan_tetapan()
+            self.muat_orang()
+
     def padam_orang(self, nama):
         nama = self.semak_nama(nama)
         with self.kunci:
@@ -713,6 +740,8 @@ def mula_web(stor, port, kata_laluan):
                     stor.buang_kumpulan(d.get("id"))
                 elif url.path == "/api/buang-gambar":
                     stor.buang_gambar(d.get("rel", ""))
+                elif url.path == "/api/tukar-nama":
+                    stor.tukar_nama(d.get("nama"), d.get("baru"))
                 elif url.path == "/api/padam-orang":
                     stor.padam_orang(d.get("nama"))
                 elif url.path == "/api/maklum":
