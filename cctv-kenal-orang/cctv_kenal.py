@@ -147,6 +147,8 @@ class Stor:
         self.maks_gambar, self.selang_simpan, self.saiz_min = maks_gambar, selang_simpan, saiz_min
         self.kunci = threading.RLock()
         self.bingkai = None
+        self.kamera = None         # untuk paparan langsung yang lancar
+        self.kotak = (0.0, [])     # (masa, kotak wajah terkini) untuk dilukis atas paparan langsung
         self.log_path = None
         self.notif = None
         try:
@@ -425,17 +427,31 @@ class Stor:
                 "whatsapp": self.notif.whatsapp.status()
                 if self.notif and self.notif.whatsapp.aktif else None}
 
-    def set_bingkai(self, img):
+    def set_bingkai(self, img, kotak=None):
         self.bingkai = img
+        self.bil_bingkai = getattr(self, "bil_bingkai", 0) + 1
+        if kotak is not None:
+            self.kotak = (time.time(), kotak)
 
     def jpg_terkini(self):
-        img = self.bingkai
+        """Bingkai terkini terus dari kamera (lancar), dengan kotak nama terkini dilukis di atasnya."""
+        kam = self.kamera
+        if kam is not None and kam.terkini is not None:
+            img, kunci = kam.terkini, ("kam", kam.idx)
+        else:
+            img, kunci = self.bingkai, ("proses", getattr(self, "bil_bingkai", 0))
         if img is None:
-            return None
+            return None, None
         s = 960 / img.shape[1]
-        if s < 1:
-            img = cv2.resize(img, None, fx=s, fy=s)
-        return cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 70])[1].tobytes()
+        img = cv2.resize(img, None, fx=s, fy=s) if s < 1 else img.copy()
+        s = min(s, 1.0)
+        t, kotak = self.kotak
+        if time.time() - t < 0.8:
+            for x, y, w, h, label, warna in kotak:
+                x, y, w, h = int(x * s), int(y * s), int(w * s), int(h * s)
+                cv2.rectangle(img, (x, y), (x + w, y + h), warna, 2)
+                cv2.putText(img, label, (x, max(14, y - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, warna, 2)
+        return kunci, cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 75])[1].tobytes()
 
 
 # ---------------------------------------------------------------- page web
@@ -532,12 +548,14 @@ def mula_web(stor, port, kata_laluan):
             self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=bingkai")
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
+            akhir = None
             while True:
-                jpg = stor.jpg_terkini()
-                if jpg:
+                kunci, jpg = stor.jpg_terkini()
+                if jpg and kunci != akhir:  # hantar hanya bila ada bingkai baru
+                    akhir = kunci
                     self.wfile.write(b"--bingkai\r\nContent-Type: image/jpeg\r\nContent-Length: "
                                      + str(len(jpg)).encode() + b"\r\n\r\n" + jpg + b"\r\n")
-                time.sleep(0.25)
+                time.sleep(0.07)  # ~12-15 bingkai sesaat
 
         def do_POST(self):
             if not self._auth():
@@ -783,14 +801,21 @@ class PerakamHD:
         atexit.register(self.tutup)
 
     def _arahan(self):
-        masuk = ["-rtsp_transport", "tcp"] if self.sumber.startswith("rtsp") else []
+        masuk = []
+        if "://" in self.sumber:
+            # buang paket rosak (WiFi lemah) & berhenti jika kamera senyap 10 saat (supaya disambung semula)
+            masuk = ["-timeout", "10000000", "-fflags", "+genpts+discardcorrupt"]
+            if self.sumber.startswith("rtsp"):
+                masuk = ["-rtsp_transport", "tcp"] + masuk
         if self.fail:
             masuk = ["-re"]  # fail video (ujian): main ikut masa sebenar
         audio = ["-map", "0:a:0?", "-c:a", "aac", "-b:a", "64k"] if self.audio else ["-an"]
         return [self.exe, "-hide_banner", "-loglevel", "error", *masuk, "-i", self.sumber,
                 "-map", "0:v:0", "-c:v", "copy", *audio,
+                # cap masa berterusan merentasi potongan (tiada reset) -> boleh disambung terus tanpa sentakan.
+                # Nama ikut nombor urutan (bukan saat) supaya dua potongan dalam saat yang sama tak bertindih.
                 "-f", "segment", "-segment_time", "2", "-segment_format", "mpegts",
-                "-reset_timestamps", "1", "-strftime", "1", str(self.dir / "%Y%m%d-%H%M%S.ts")]
+                str(self.dir / f"{datetime.now():%Y%m%d%H%M%S}_%06d.ts")]
 
     def _loop(self):
         while not self.tamat:
@@ -815,13 +840,20 @@ class PerakamHD:
                 pass
 
     def _senarai(self):
-        out = []
+        """-> [(mula, akhir, fail)] ikut masa. Akhir = masa fail terakhir ditulis; mula = akhir potongan sebelumnya."""
+        fail = []
         for f in self.dir.glob("*.ts"):
             try:
-                out.append((datetime.strptime(f.stem, "%Y%m%d-%H%M%S").timestamp(), f))
-            except ValueError:
+                fail.append((f.stat().st_mtime, f))
+            except OSError:
                 pass
-        return sorted(out)
+        fail.sort()
+        out, sebelum = [], None
+        for akhir, f in fail:
+            mula = sebelum if sebelum is not None and akhir - sebelum < 10 else akhir - 2.5
+            out.append((mula, akhir, f))
+            sebelum = akhir
+        return out
 
     def _berjalan(self):
         return self.proses is not None and self.proses.poll() is None
@@ -829,27 +861,25 @@ class PerakamHD:
     def klip(self, t_dari, t_hingga, laluan, tunggu=40):
         """Cantum potongan yang meliputi [t_dari, t_hingga] ke `laluan`. -> bait MP4 atau None"""
         had = time.time() + tunggu
-        while time.time() < had:  # tunggu sehingga potongan yang meliputi t_hingga ditutup
+        def lengkap():  # potongan terakhir masih ditulis semasa perakam berjalan
             seg = self._senarai()
-            if any(t > t_hingga for t, _ in seg) or not self._berjalan():
+            return seg[:-1] if self._berjalan() else seg
+        while time.time() < had:  # tunggu sehingga potongan yang meliputi t_hingga ditutup
+            if any(akhir >= t_hingga for _, akhir, _ in lengkap()) or not self._berjalan():
                 break
             time.sleep(0.5)
-        seg = self._senarai()
-        if self._berjalan() and seg:
-            mula_akhir = seg[-1][0]   # potongan terakhir masih ditulis
-            seg = seg[:-1]
-        else:
-            mula_akhir = float("inf")
-        pilih = []
-        for i, (t, f) in enumerate(seg):
-            t_seterus = seg[i + 1][0] if i + 1 < len(seg) else mula_akhir
-            if t <= t_hingga and t_seterus > t_dari:
-                pilih.append(f)
+        pilih = [f for mula, akhir, f in lengkap() if akhir > t_dari and mula < t_hingga]
         if not pilih:
             print("[klip-hd] tiada rakaman untuk tempoh ini")
             return None
-        senarai = laluan.with_suffix(".txt")
-        senarai.write_text("".join(f"file '{f.as_posix()}'\n" for f in pilih), encoding="utf-8")
+        # MPEG-TS boleh disambung bait-demi-bait; dengan cap masa berterusan hasilnya lancar tanpa jurang
+        gabung = laluan.with_suffix(".ts")
+        with open(gabung, "wb") as out:
+            for f in pilih:
+                try:
+                    out.write(f.read_bytes())
+                except OSError:
+                    pass
         if self.kodek is None:  # semak kodek kamera sekali
             r = subprocess.run([self.exe, "-hide_banner", "-i", str(pilih[0])], capture_output=True, text=True, encoding="utf-8", errors="replace")
             self.kodek = "hevc" if "Video: hevc" in r.stderr else "h264"
@@ -857,10 +887,10 @@ class PerakamHD:
                 print("[klip-hd] kamera guna H.265 - klip akan ditukar ke H.264 supaya boleh dimain di WhatsApp")
         video = ["-c:v", "copy"] if self.kodek == "h264" else \
             ["-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-pix_fmt", "yuv420p"]
-        r = subprocess.run([self.exe, "-hide_banner", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0",
-                            "-i", str(senarai), *video, "-c:a", "copy", "-bsf:a", "aac_adtstoasc",
-                            "-movflags", "+faststart", str(laluan)], capture_output=True, text=True, encoding="utf-8", errors="replace")
-        senarai.unlink(missing_ok=True)
+        r = subprocess.run([self.exe, "-hide_banner", "-loglevel", "error", "-y", "-i", str(gabung),
+                            *video, "-c:a", "copy", "-bsf:a", "aac_adtstoasc", "-movflags", "+faststart",
+                            str(laluan)], capture_output=True, text=True, encoding="utf-8", errors="replace")
+        gabung.unlink(missing_ok=True)
         if r.returncode != 0 or not laluan.exists():
             print(f"[klip-hd] gagal cantum: {r.stderr[:300]}")
             return None
@@ -894,6 +924,7 @@ class Kamera:
         self.sumber = int(sumber) if str(sumber).isdigit() else sumber
         self.fail_video = isinstance(self.sumber, str) and Path(self.sumber).is_file()
         self.bingkai, self.tamat = None, False
+        self.terkini = None  # bingkai terbaru (untuk paparan langsung), tidak dikosongkan bila dibaca
         self.kunci = threading.Lock()
         # penimbal klip: bingkai kecil beberapa saat terakhir
         self.sebelum, self.lebar_klip = sebelum, lebar_klip
@@ -928,6 +959,7 @@ class Kamera:
             t = self._terima(f)
             with self.kunci:
                 self.bingkai = (t, f)
+            self.terkini = f
 
     def _terima(self, f):
         """Masukkan bingkai ke penimbal klip. -> masa bingkai"""
@@ -963,6 +995,7 @@ class Kamera:
                 self.tamat = True
                 return None
             self.masa = self._terima(f)
+            self.terkini = f
             return f
         with self.kunci:
             b, self.bingkai = self.bingkai, None
@@ -1036,6 +1069,7 @@ def cmd_pantau(a):
             else f"berlabel {a.klip_lebar}px"
         print(f"Klip video: {a.klip_sebelum:g}s sebelum + {a.klip_selepas:g}s selepas ({mod})")
     kam = Kamera(a.sumber, a.klip_sebelum, a.klip_lebar if guna_video and not perakam else 0)
+    stor.kamera = kam
     anotasi = deque(maxlen=600)  # kotak wajah terkini untuk dilukis dalam klip
     klip_semasa = None
     threads_klip = []
@@ -1132,7 +1166,7 @@ def cmd_pantau(a):
 
             if kotak:
                 anotasi.append((kam.masa, img.shape[1], kotak))
-            stor.set_bingkai(img)
+            stor.set_bingkai(img, kotak)
             if a.rakam:
                 if penulis is None:
                     penulis = cv2.VideoWriter(a.rakam, cv2.VideoWriter_fourcc(*"mp4v"), 15,
