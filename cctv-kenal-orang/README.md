@@ -38,7 +38,7 @@ Buka alamat itu dari telefon atau komputer yang guna **WiFi yang sama**.
 
 | Tab | Kegunaan |
 |---|---|
-| **Wajah baru** | Kad untuk setiap orang yang belum dikenali. Taip nama dan tekan Simpan. Ketik gambar yang salah orang supaya ia tidak disimpan. Butang "Mungkin Ali?" muncul jika wajah itu mirip orang yang sudah berdaftar. |
+| **Wajah baru** | Kad untuk setiap orang yang belum dikenali. Taip nama dan tekan Simpan. Ketik gambar yang salah orang supaya ia tidak disimpan. Butang "Mungkin Ali?" muncul jika wajah itu mirip orang yang sudah berdaftar. Kalau orang yang sama ada dalam beberapa kad, tanda **Pilih** pada kad-kad itu dan tekan **Gabungkan**. |
 | **Orang berdaftar** | Senarai orang dan gambar mereka. Anda boleh tambah orang baru dengan memuat naik gambar dari telefon, padam gambar yang salah, atau padam orang. |
 | **Log & video** | Klip video setiap notifikasi, dan senarai siapa dikesan hari ini. |
 | **Langsung** | Video kamera dengan label nama. |
@@ -206,7 +206,7 @@ Simpan semua baris `export` dalam fail `tetapan.sh`, kemudian jalankan:
 |---|---|---|
 | `--fps` | 5 | Bilangan bingkai diproses sesaat. Nilai rendah kurangkan beban CPU dan elektrik. `0` = proses semua bingkai. |
 | `--ambang` | 0.363 | Had untuk dikira "kenal". Naikkan (0.45) jika orang tersalah dikenali. Turunkan (0.30) jika orang berdaftar tidak dikenali. |
-| `--ambang-kumpul` | 0.45 | Had untuk kumpulkan wajah baru sebagai orang yang sama. Naikkan jika dua orang berbeza masuk satu kad. |
+| `--ambang-kumpul` | 0.38 | Had untuk kumpulkan wajah baru sebagai orang yang sama. Turunkan (0.34) jika orang yang sama masih berpecah ke banyak kad. Naikkan (0.45) jika dua orang berbeza masuk satu kad. |
 | `--cooldown` | 60 | Saat sebelum orang yang sama dicatat atau dimaklum semula. |
 | `--maks-gambar` | 30 | Maksimum gambar disimpan bagi setiap wajah baru. |
 | `--saiz-min` | 60 | Saiz wajah minimum (piksel) untuk disimpan. Wajah yang kecil atau kabur tidak disimpan. |
@@ -214,6 +214,13 @@ Simpan semua baris `export` dalam fail `tetapan.sh`, kemudian jalankan:
 | `--rakam fail.mp4` | – | Simpan video berlabel. |
 
 ## Tips ketepatan
+
+**Orang yang sama dalam satu kad.** Sistem mengemas kad secara automatik dengan tiga cara:
+- Wajah baru yang padan dengan beberapa kad akan **menggabungkan** kad-kad itu.
+- Setiap kali sistem dimulakan, dan setiap jam, kad yang mirip satu sama lain digabung. Kad yang padan dengan orang yang sudah berdaftar dimasukkan terus ke nama orang itu.
+- Selepas anda menamakan satu kad, kad lain orang yang sama **terus masuk** ke nama itu.
+
+Wajah dari sisi, wajah yang terlalu kecil dan wajah yang kabur tidak disimpan, kerana gambar begini sering mencipta kad baru. Kalau masih ada kad berpecah, gunakan **Pilih** dan **Gabungkan**.
 
 - Letak kamera pada paras muka, contohnya di pintu masuk. Kamera di siling yang menghala ke bawah sukar melihat wajah.
 - Lebih banyak gambar setiap orang (5–20), dari sudut dan cahaya berbeza, memberi ketepatan yang lebih baik. Gambar dari CCTV itu sendiri adalah yang terbaik.

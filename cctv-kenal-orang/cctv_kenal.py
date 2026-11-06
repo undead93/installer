@@ -140,7 +140,7 @@ class Enjin:
 class Stor:
     """Pegang senarai orang berdaftar & kumpulan wajah baru. Dikongsi antara kamera dan page web."""
 
-    def __init__(self, enjin, ambang=0.363, ambang_kumpul=0.45, maks_gambar=30, selang_simpan=5.0,
+    def __init__(self, enjin, ambang=0.363, ambang_kumpul=0.38, maks_gambar=30, selang_simpan=5.0,
                  saiz_min=60):
         self.enjin = enjin
         self.ambang, self.ambang_kumpul = ambang, ambang_kumpul
@@ -161,6 +161,7 @@ class Stor:
         WAJAH_BARU.mkdir(exist_ok=True)
         self.muat_orang()
         self.muat_kumpulan()
+        self.gabung_semua()
 
     # ---- orang berdaftar
     def muat_orang(self, verbose=False):
@@ -216,12 +217,20 @@ class Stor:
             nama, skor = self.padan_orang(f)
             if nama is not None and skor >= self.ambang:
                 return nama, skor, None
-            terbaik, kid = -1.0, None
+            cocok = []
             for k_id, k in self.kumpulan.items():
                 s = float(np.max(np.stack(k["ciri"]) @ f))
-                if s > terbaik:
-                    terbaik, kid = s, k_id
-            return None, skor, (kid if terbaik >= self.ambang_kumpul else None)
+                if s >= self.ambang_kumpul:
+                    cocok.append((s, k_id))
+            if not cocok:
+                return None, skor, None
+            cocok.sort(reverse=True)
+            # wajah ini padan dengan beberapa kad -> kad-kad itu orang yang sama, gabungkan
+            jambatan = [k_id for s, k_id in cocok if s >= self.ambang_kumpul + 0.04]
+            if len(jambatan) > 1:
+                sasaran = self._gabung(jambatan)
+                return None, skor, sasaran
+            return None, skor, cocok[0][1]
 
     def rekod_asing(self, img, face, f, kid, sekarang):
         """Simpan potongan wajah orang tidak dikenali. -> (id_kumpulan | None, kumpulan_baru)"""
@@ -232,6 +241,8 @@ class Stor:
                 k["akhir_lihat"] = sekarang
                 if len(k["fail"]) >= self.maks_gambar or sekarang - k["akhir_simpan"] < self.selang_simpan:
                     return kid, False
+            if not self._menghadap(face):
+                return kid, False  # wajah dari sisi: cap jari wajah lemah, mudah jadi kad berasingan
             crop = self._potong(img, x, y, w, h)
             if min(w, h) < self.saiz_min or crop is None:
                 return kid, False  # wajah terlalu kecil/kabur untuk disimpan
@@ -249,6 +260,87 @@ class Stor:
             k["ciri"].append(f)
             k["akhir_simpan"] = sekarang
             return kid, baru
+
+    @staticmethod
+    def _menghadap(face):
+        """True jika wajah lebih kurang menghadap kamera (hidung di antara kedua-dua mata)."""
+        w = float(face[2])
+        m1, m2 = sorted((float(face[4]), float(face[6])))
+        lebar = m2 - m1
+        if w <= 0 or lebar < 0.25 * w:
+            return False
+        return 0.25 <= (float(face[8]) - m1) / lebar <= 0.75
+
+    # ---- gabung kad orang yang sama
+    @staticmethod
+    def _skor_set(a, b):
+        """Purata 3 pasangan paling serupa antara dua set cap jari wajah."""
+        s = np.sort((np.stack(a) @ np.stack(b).T).ravel())[::-1]
+        return float(np.mean(s[:3]))
+
+    def _gabung(self, ids):
+        """Gabungkan beberapa kad ke dalam kad yang paling banyak gambar. -> id kad sasaran"""
+        with self.kunci:
+            ids = [i for i in dict.fromkeys(ids) if i in self.kumpulan]
+            if not ids:
+                return None
+            sasaran = max(ids, key=lambda i: len(self.kumpulan[i]["fail"]))
+            k, d = self.kumpulan[sasaran], WAJAH_BARU / sasaran
+            d.mkdir(exist_ok=True)
+            for sid in ids:
+                if sid == sasaran:
+                    continue
+                sk = self.kumpulan.pop(sid)
+                for p, c in zip(sk["fail"], sk["ciri"]):
+                    baru = d / f"{sid[-4:]}_{p.name}"
+                    try:
+                        shutil.move(str(p), baru)
+                        shutil.move(str(fail_ciri(p)), fail_ciri(baru))
+                    except OSError:
+                        continue
+                    k["fail"].append(baru)
+                    k["ciri"].append(c)
+                k["akhir_lihat"] = max(k["akhir_lihat"], sk["akhir_lihat"])
+                shutil.rmtree(WAJAH_BARU / sid, ignore_errors=True)
+            if len(ids) > 1:
+                print(f"[wajah] {len(ids)} kad digabung (orang yang sama) -> #{sasaran[-4:]}")
+            return sasaran
+
+    def gabung_semua(self):
+        """Kemaskan kad: masukkan kad yang padan dengan orang berdaftar, dan gabung kad orang yang sama."""
+        with self.kunci:
+            dilabel = 0
+            if len(self.ciri):
+                for kid in list(self.kumpulan):
+                    terbaik, nama = 0.0, None
+                    for n in set(self.nama.tolist()):
+                        sk = self._skor_set(self.kumpulan[kid]["ciri"], list(self.ciri[self.nama == n]))
+                        if sk > terbaik:
+                            terbaik, nama = sk, n
+                    if nama and terbaik >= self.ambang_kumpul:
+                        self.label(kid, nama, gabung=False)
+                        dilabel += 1
+            berubah = True
+            while berubah:
+                berubah = False
+                ids = list(self.kumpulan)
+                for i in range(len(ids)):
+                    for j in range(i + 1, len(ids)):
+                        if self._skor_set(self.kumpulan[ids[i]]["ciri"],
+                                          self.kumpulan[ids[j]]["ciri"]) >= self.ambang_kumpul:
+                            self._gabung([ids[i], ids[j]])
+                            berubah = True
+                            break
+                    if berubah:
+                        break
+            if dilabel:
+                print(f"[wajah] {dilabel} kad dimasukkan terus ke orang berdaftar (wajah sepadan)")
+
+    def gabung_manual(self, ids):
+        ids = [i for i in (ids or []) if i in self.kumpulan]
+        if len(ids) < 2:
+            raise ValueError("Pilih sekurang-kurangnya 2 kad untuk digabung.")
+        self._gabung(ids)
 
     @staticmethod
     def _potong(img, x, y, w, h):
@@ -270,6 +362,7 @@ class Stor:
         with self.kunci:
             for kid in [k for k, v in self.kumpulan.items() if v["akhir_lihat"] < had]:
                 self.buang_kumpulan(kid)
+            self.gabung_semua()
         if KLIP_DIR.is_dir():
             for f in KLIP_DIR.glob("*.mp4"):
                 try:
@@ -286,7 +379,7 @@ class Stor:
             raise ValueError("Nama tidak sah. Guna huruf, nombor, jarak, - atau _ sahaja (maks 40).")
         return nama
 
-    def label(self, kid, nama, keluarkan=()):
+    def label(self, kid, nama, keluarkan=(), gabung=True):
         nama = self.semak_nama(nama)
         with self.kunci:
             k = self.kumpulan.pop(kid, None)
@@ -301,6 +394,8 @@ class Stor:
                 shutil.move(str(fail_ciri(p)), fail_ciri(dest / f"{kid}_{p.name}"))
             shutil.rmtree(WAJAH_BARU / kid, ignore_errors=True)
             self.muat_orang()
+            if gabung:
+                self.gabung_semua()  # kad lain orang yang sama terus masuk ke nama ini
 
     def buang_kumpulan(self, kid):
         with self.kunci:
@@ -578,6 +673,8 @@ def mula_web(stor, port, kata_laluan):
                 d = json.loads(badan or b"{}")
                 if url.path == "/api/label":
                     stor.label(d.get("id"), d.get("nama"), set(d.get("keluarkan", [])))
+                elif url.path == "/api/gabung":
+                    stor.gabung_manual(d.get("ids"))
                 elif url.path == "/api/buang-kumpulan":
                     stor.buang_kumpulan(d.get("id"))
                 elif url.path == "/api/buang-gambar":
@@ -1214,8 +1311,8 @@ def main():
     m.add_argument("--kata-laluan", help="kata laluan untuk page web (nama pengguna: apa-apa)")
     m.add_argument("--ambang", type=float, default=0.363,
                    help="had skor untuk dikira 'kenal' (tinggi = lebih ketat). Default 0.363")
-    m.add_argument("--ambang-kumpul", type=float, default=0.45,
-                   help="had skor untuk kumpulkan wajah baru sebagai orang yang sama. Default 0.45")
+    m.add_argument("--ambang-kumpul", type=float, default=0.38,
+                   help="had skor untuk kumpulkan wajah baru sebagai orang yang sama. Default 0.38")
     m.add_argument("--fps", type=float, default=5, help="bingkai diproses sesaat (0 = semua). Default 5")
     m.add_argument("--cooldown", type=float, default=60,
                    help="saat sebelum orang yang sama dilog/dimaklum semula")

@@ -63,6 +63,15 @@
            transition: opacity .2s; pointer-events: none; max-width: calc(100% - 32px); }
   #toast.tunjuk { opacity: 1; }
   .fail-input { display: none; }
+  .pilih { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--pudar); cursor: pointer; }
+  .pilih input { width: 18px; height: 18px; accent-color: var(--utama); margin: 0; }
+  .kad.dipilih { outline: 2px solid var(--utama); outline-offset: -1px; }
+  #bar-gabung { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; background: var(--kad);
+                border-top: 1px solid var(--garis); padding: 12px 16px; display: flex; gap: 8px;
+                align-items: center; justify-content: center; box-shadow: 0 -4px 16px rgba(0,0,0,.12); }
+  #bar-gabung[hidden] { display: none; }
+  body:has(#bar-gabung:not([hidden])) main { padding-bottom: 96px; }
+  #bar-gabung span { flex: 1; max-width: 420px; }
   .suis { display: flex; align-items: center; gap: 10px; margin-top: 12px; cursor: pointer; user-select: none; }
   .suis input { appearance: none; width: 44px; height: 26px; border-radius: 13px; background: var(--garis);
                 position: relative; cursor: pointer; flex: none; margin: 0; transition: background .15s; }
@@ -99,7 +108,8 @@
 <main>
   <section id="t-baru">
     <p class="bantu">Setiap kad ialah seorang yang belum dikenali. Taip namanya dan tekan Simpan.
-      Ketik gambar yang salah orang supaya ia tidak disimpan.</p>
+      Ketik gambar yang salah orang supaya ia tidak disimpan.
+      Kalau orang yang sama ada dalam beberapa kad, tanda <b>Pilih</b> pada kad-kad itu dan tekan <b>Gabungkan</b>.</p>
     <div id="senarai-baru"></div>
   </section>
 
@@ -135,6 +145,11 @@
 </main>
 
 <datalist id="senarai-nama"></datalist>
+<div id="bar-gabung" hidden>
+  <span id="bil-pilih"></span>
+  <button class="btn" id="btn-batal-pilih">Batal</button>
+  <button class="btn utama" id="btn-gabung">Gabungkan</button>
+</div>
 <div id="toast"></div>
 
 <script>
@@ -157,7 +172,17 @@ async function post(path, body, jenis = 'application/json') {
   return j;
 }
 
+const dipilih = new Set();  // id kad yang ditanda untuk digabung
+function kemasBarGabung() {
+  for (const id of [...dipilih]) if (!data.baru.some(k => k.id === id)) dipilih.delete(id);
+  $('#bar-gabung').hidden = dipilih.size < 1;
+  $('#bil-pilih').textContent = dipilih.size < 2 ? `${dipilih.size} kad dipilih – pilih satu lagi`
+                                                 : `${dipilih.size} kad dipilih (orang yang sama)`;
+  $('#btn-gabung').disabled = dipilih.size < 2;
+}
+
 function sibuk() {
+  if (dipilih.size) return true;
   const a = document.activeElement;
   if (a && a.tagName === 'INPUT') return true;
   if ([...document.querySelectorAll('input.mesej')].some(i => i.value !== i.defaultValue)) return true;
@@ -212,9 +237,10 @@ function lukisBaru() {
   }
   el.innerHTML = data.baru.map(k => {
     const ks = keluar[k.id] || new Set();
-    return `<div class="kad" data-id="${esc(k.id)}">
+    return `<div class="kad ${dipilih.has(k.id) ? 'dipilih' : ''}" data-id="${esc(k.id)}">
       <div class="atas"><b>Orang #${esc(k.pendek)}</b>
-        <span class="pudar">${k.gambar.length} gambar · dilihat ${esc(k.akhir)}</span></div>
+        <label class="pilih"><input type="checkbox" class="pilih-kad" ${dipilih.has(k.id) ? 'checked' : ''}> Pilih</label></div>
+      <div class="pudar" style="margin:-4px 0 10px">${k.gambar.length} gambar · dilihat ${esc(k.akhir)}</div>
       <div class="grid">${k.gambar.map(g => `<button class="gmb ${ks.has(g.fail) ? 'keluar' : ''}"
           data-fail="${esc(g.fail)}" title="Ketik untuk keluarkan"><img loading="lazy" src="${g.url}" alt=""></button>`).join('')}</div>
       ${k.cadangan ? `<button class="chip" data-cadang="${esc(k.cadangan)}">Mungkin ${esc(k.cadangan)}?</button>` : ''}
@@ -224,6 +250,7 @@ function lukisBaru() {
         <button class="btn bahaya" data-tindakan="buang">Buang</button>
       </div></div>`;
   }).join('');
+  kemasBarGabung();
 }
 
 function lukisOrang() {
@@ -321,6 +348,24 @@ $('#senarai-baru').addEventListener('click', async e => {
     muat(true);
   } catch (err) { toast(err.message); t.disabled = false; }
 });
+$('#senarai-baru').addEventListener('change', e => {
+  if (!e.target.matches('input.pilih-kad')) return;
+  const kad = e.target.closest('.kad');
+  e.target.checked ? dipilih.add(kad.dataset.id) : dipilih.delete(kad.dataset.id);
+  kad.classList.toggle('dipilih', e.target.checked);
+  e.target.blur();
+  kemasBarGabung();
+});
+$('#btn-batal-pilih').onclick = () => { dipilih.clear(); lukisBaru(); };
+$('#btn-gabung').onclick = async () => {
+  const ids = [...dipilih];
+  try {
+    await post('/api/gabung', { ids });
+    toast(`${ids.length} kad digabung menjadi satu`);
+    dipilih.clear();
+    muat(true);
+  } catch (err) { toast(err.message); }
+};
 $('#senarai-baru').addEventListener('keydown', e => {
   if (e.key === 'Enter' && e.target.matches('input')) e.target.closest('.kad').querySelector('[data-tindakan=simpan]').click();
 });
