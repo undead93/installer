@@ -8,3 +8,5 @@ pangkalan.npz
 __pycache__/
 tetapan.json
 tetapan.sh
+whatsapp/node_modules/
+whatsapp/auth/

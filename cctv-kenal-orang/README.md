@@ -74,54 +74,56 @@ URL RTSP jenama lain:
 | `log/YYYY-MM-DD.csv` | Rekod masa, nama dan skor. Boleh dijadikan rekod kehadiran. |
 | `tangkapan/` | Gambar penuh semasa orang tidak dikenali dikesan. |
 
-## Notifikasi WhatsApp
+## Notifikasi WhatsApp (Baileys)
 
-Bila **orang berdaftar** dikesan, sistem hantar mesej WhatsApp seperti ini:
+Bila **orang berdaftar** dikesan, sistem hantar mesej WhatsApp **dengan gambar**:
 
     ✅ Ali dikesan di kamera
     🕒 06/11 10:32 AM
 
 Sistem juga hantar mesej bila **orang tidak dikenali** dikesan, bersama pautan ke page web untuk namakan orang itu.
 
-- Dalam tab **Orang berdaftar**, setiap orang ada suis *Hantar notifikasi*. Matikan suis untuk orang yang anda tak perlu dimaklumkan.
-- Untuk orang yang sama, notifikasi hanya dihantar sekali setiap 10 minit. Ubah dengan `--cooldown-maklum 1800` (30 minit).
-- Untuk tutup notifikasi orang tidak dikenali, guna `--tanpa-maklum-asing`.
-- Butang **Hantar ujian** dalam page web akan hantar mesej ujian untuk memastikan semuanya berfungsi.
-
-Pilih **satu** daripada dua cara di bawah.
-
-### Cara A: Green-API (dengan gambar) – disyorkan
-
-Green-API menyambung nombor WhatsApp anda melalui QR, sama macam WhatsApp Web. Mesej dihantar **dari nombor itu**,
+Mesej dihantar terus dari Mac anda menggunakan [Baileys](https://github.com/WhiskeySockets/Baileys), iaitu sambungan
+WhatsApp Web. Tiada servis luar dan tiada bayaran. Mesej akan datang **dari nombor yang imbas QR**,
 jadi guna nombor kedua (contohnya nombor prepaid lama) sebagai "nombor CCTV". Penerima boleh nombor anda sendiri
 atau satu kumpulan WhatsApp keluarga.
 
-1. Daftar di **green-api.com** dan buat *instance* (ada pelan percuma *Developer*).
-2. Dalam console, imbas QR dengan WhatsApp nombor CCTV (Peranti Dipautkan, kemudian Pautkan Peranti).
-3. Salin **idInstance**, **apiTokenInstance** dan **apiUrl** dari console.
-4. Sebelum jalankan sistem, set:
+### Pasang (sekali sahaja)
 
-       export GREENAPI_INSTANCE="7103123456"
-       export GREENAPI_TOKEN="abc123..."
-       export GREENAPI_URL="https://7103.api.greenapi.com"     # apiUrl dari console
-       export WHATSAPP_KE="0123456789,0198765432"             # nombor penerima, dipisah koma
+    brew install node              # Node.js 20 atau lebih baru
+    cd whatsapp && npm install && cd ..
 
-   Untuk hantar ke kumpulan WhatsApp, letak ID kumpulan (contohnya `120363012345678901@g.us`) dalam `WHATSAPP_KE`.
-   ID kumpulan boleh didapati dalam console Green-API (getChats).
+### Jalankan
 
-Green-API bukan servis rasmi WhatsApp. Gunakan nombor kedua, bukan nombor utama anda.
+    export WHATSAPP_KE="0123456789"                 # nombor penerima; beberapa nombor dipisah koma
+    python3 cctv_kenal.py pantau --sumber "rtsp://..."
 
-### Cara B: CallMeBot (percuma, teks sahaja)
+1. Penghantar WhatsApp dimulakan secara automatik. **Kali pertama**, QR akan dipaparkan dalam terminal dan
+   dalam page web (tab **Orang berdaftar**).
+2. Dengan telefon nombor CCTV, buka WhatsApp, pergi ke **Tetapan**, kemudian **Peranti Dipautkan**, kemudian **Pautkan Peranti**, dan imbas QR itu.
+3. Bila page web tunjuk "WhatsApp bersambung", tekan **Hantar ujian**.
 
-Cara ini paling mudah, tetapi **tiada gambar**, dan mesej hanya boleh dihantar ke nombor yang mendaftar sendiri.
+Sesi disimpan dalam `whatsapp/auth/`, jadi QR tidak perlu diimbas lagi selepas ini. Jangan kongsi folder itu.
+Untuk tukar nombor CCTV, padam folder itu, atau log keluar peranti dari telefon, dan imbas QR baru.
 
-1. Buka **callmebot.com**, pergi ke bahagian *WhatsApp API*, dan simpan nombor bot yang tertera dalam kenalan telefon. Nombor ini pernah bertukar, jadi sentiasa ambil dari laman itu.
-2. Hantar mesej WhatsApp `I allow callmebot to send me messages` ke nombor itu.
-3. Anda akan terima **apikey**. Kemudian set:
+Telefon nombor CCTV tak perlu sentiasa hidup. Ia cuma perlu dibuka sekurang-kurangnya sekali setiap 14 hari,
+supaya WhatsApp tidak memutuskan peranti yang dipautkan.
 
-       export CALLMEBOT="0123456789:123456"
+### Hantar ke kumpulan WhatsApp keluarga
 
-   Untuk beberapa penerima, setiap seorang perlu buat langkah 1–2. Kemudian set: `CALLMEBOT="0123456789:111111,0198765432:222222"`
+1. Masukkan nombor CCTV ke dalam kumpulan itu.
+2. Semasa sistem berjalan, buka `http://127.0.0.1:3001/kumpulan` di Mac. Salin `id` kumpulan, contohnya `120363012345678901@g.us`.
+3. Set `export WHATSAPP_KE="120363012345678901@g.us"`. Anda boleh campur ID kumpulan dengan nombor biasa, dipisah koma.
+
+### Kawalan
+
+- Dalam tab **Orang berdaftar**, setiap orang ada suis *Hantar notifikasi*. Matikan suis untuk orang yang anda tak perlu dimaklumkan.
+- Untuk orang yang sama, notifikasi hanya dihantar sekali setiap 10 minit. Ubah dengan `--cooldown-maklum 1800` (30 minit).
+- Untuk tutup notifikasi orang tidak dikenali, guna `--tanpa-maklum-asing`.
+- Untuk cuba tanpa menghantar mesej sebenar, guna `WA_KERING=1`. Mesej akan dicetak dalam terminal sahaja.
+
+Baileys bukan aplikasi rasmi WhatsApp. Kalau terlalu banyak mesej dihantar, nombor itu boleh disekat.
+Sebab itu guna nombor kedua, dan kekalkan cooldown notifikasi.
 
 ### Telegram (pilihan)
 
@@ -129,7 +131,7 @@ Cara ini paling mudah, tetapi **tiada gambar**, dan mesej hanya boleh dihantar k
 2. Hantar apa-apa mesej kepada bot anda, kemudian buka `https://api.telegram.org/bot<TOKEN>/getUpdates` dan salin `chat.id`.
 3. Set `export TELEGRAM_TOKEN="123456:ABC..."` dan `export TELEGRAM_CHAT_ID="987654321"`.
 
-Anda boleh hidupkan WhatsApp dan Telegram serentak. Setiap notifikasi akan dihantar ke semua saluran yang disetkan.
+Anda boleh hidupkan WhatsApp dan Telegram serentak.
 
 ### Simpan tetapan supaya tak perlu taip setiap kali
 

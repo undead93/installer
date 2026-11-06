@@ -72,6 +72,10 @@
   .suis input:checked::after { left: 21px; }
   .status { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
   .status .btn { padding: 6px 12px; font-size: 14px; }
+  .wa { width: 100%; }
+  .wa img { display: block; width: 220px; max-width: 100%; margin: 10px 0 6px; border-radius: 8px; background: #fff; padding: 6px; }
+  .titik { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--pudar); }
+  .titik.ok { background: var(--ok); } .titik.amaran { background: #f59e0b; }
 </style>
 </head>
 <body>
@@ -98,6 +102,7 @@
     <div class="kad status">
       <div><b>Notifikasi</b><div class="pudar" id="saluran">-</div></div>
       <button class="btn" id="btn-uji">Hantar ujian</button>
+      <div class="wa" id="wa" hidden></div>
     </div>
     <div class="kad">
       <b>Tambah orang dari gambar telefon</b>
@@ -166,7 +171,28 @@ function lukis() {
     ? 'Aktif: ' + data.saluran.join(', ')
     : 'Belum disetkan. Lihat README untuk sambung WhatsApp.';
   $('#btn-uji').disabled = !(data.saluran && data.saluran.length);
+  lukisWA(data.whatsapp);
   lukisBaru(); lukisOrang(); lukisLog();
+}
+
+let qrTerakhir = null;
+function lukisWA(w) {
+  const el = $('#wa');
+  el.hidden = !w;
+  if (!w) return;
+  if (w.status === 'bersambung') {
+    el.innerHTML = `<span class="titik ok"></span>WhatsApp bersambung${w.nombor ? ' (+' + esc(w.nombor) + ')' : ''}`;
+  } else if (w.status === 'imbas_qr' && w.qr) {
+    if (qrTerakhir === w.qr && el.querySelector('img')) return;
+    qrTerakhir = w.qr;
+    el.innerHTML = `<span class="titik amaran"></span><b>Sambung WhatsApp:</b> buka WhatsApp di telefon nombor CCTV,
+      pergi ke Tetapan, Peranti Dipautkan, Pautkan Peranti, dan imbas QR ini.
+      <img src="${w.qr}" alt="QR WhatsApp"><span class="pudar">QR bertukar setiap ~20 saat. Page ini kemas kini sendiri.</span>`;
+  } else if (w.status === 'tiada') {
+    el.innerHTML = '<span class="titik"></span>Penghantar WhatsApp tidak berjalan. Semak terminal (perlu Node.js dan <code>npm install</code> dalam folder whatsapp).';
+  } else {
+    el.innerHTML = '<span class="titik amaran"></span>WhatsApp sedang menyambung...';
+  }
 }
 
 function lukisBaru() {
@@ -322,6 +348,7 @@ $('#senarai-orang').addEventListener('change', async e => {
 
 muat(true);
 setInterval(() => muat(false), 8000);
+setInterval(() => { if (tab === 'orang' && data.whatsapp && data.whatsapp.status !== 'bersambung') muat(false); }, 3000);
 </script>
 </body>
 </html>

@@ -9,6 +9,7 @@ Guna OpenCV sahaja (YuNet untuk kesan wajah, SFace untuk kenal wajah).
   python3 cctv_kenal.py daftar     # proses gambar yang anda letak sendiri dalam orang/<nama>/
 """
 import argparse
+import atexit
 import base64
 import csv
 import json
@@ -16,9 +17,11 @@ import os
 import re
 import shutil
 import socket
+import subprocess
 import sys
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
@@ -36,6 +39,7 @@ WAJAH_BARU = ROOT / "wajah_baru"  # wajah tidak dikenali, dikumpul ikut orang: w
 LOG_DIR = ROOT / "log"
 TANGKAPAN = ROOT / "tangkapan"    # gambar penuh semasa orang tidak dikenali dikesan
 HALAMAN = ROOT / "halaman.html"
+WA_DIR = ROOT / "whatsapp"         # penghantar WhatsApp (Baileys, Node.js)
 TETAPAN = ROOT / "tetapan.json"   # siapa yang tidak hantar notifikasi, dll
 
 MODELS = {
@@ -378,7 +382,9 @@ class Stor:
             with open(self.log_path, newline="") as fh:
                 log = list(csv.reader(fh))[1:][-200:][::-1]
         return {"baru": baru, "orang": orang, "log": log,
-                "saluran": self.notif.nama if self.notif else []}
+                "saluran": self.notif.nama if self.notif else [],
+                "whatsapp": self.notif.whatsapp.status()
+                if self.notif and self.notif.whatsapp.aktif else None}
 
     def set_bingkai(self, img):
         self.bingkai = img
@@ -494,7 +500,7 @@ def mula_web(stor, port, kata_laluan):
                     stor.set_maklum(d.get("nama"), bool(d.get("hidup")))
                 elif url.path == "/api/uji-maklum":
                     if not stor.notif or not stor.notif.saluran:
-                        raise ValueError("Tiada saluran notifikasi disetkan (lihat README).")
+                        raise ValueError("Notifikasi belum disetkan. Set WHATSAPP_KE (lihat README).")
                     ralat = stor.notif.hantar_segera("🔔 Ujian notifikasi dari CCTV Kenal Orang", stor.bingkai)
                     if ralat:
                         raise ValueError("Gagal: " + "; ".join(ralat))
@@ -549,62 +555,62 @@ class Telegram:
             _post_multipart(url + "sendPhoto", {"chat_id": self.chat, "caption": teks}, "photo", _jpg(img))
 
 
-class WhatsAppGreenAPI:
-    """WhatsApp dengan gambar melalui Green-API (green-api.com). Nombor anda disambung melalui QR."""
-    nama = "WhatsApp (Green-API)"
+class WhatsApp:
+    """WhatsApp melalui Baileys (whatsapp/server.mjs). Mesej dihantar dari nombor yang imbas QR."""
+    nama = "WhatsApp"
 
     def __init__(self):
-        self.instance = os.environ.get("GREENAPI_INSTANCE")
-        self.token = os.environ.get("GREENAPI_TOKEN")
-        self.base = os.environ.get("GREENAPI_URL", "https://api.green-api.com").rstrip("/")
-        self.ke = [self._chat_id(x) for x in os.environ.get("WHATSAPP_KE", "").split(",") if x.strip()]
-        self.aktif = bool(self.instance and self.token and self.ke)
+        self.url = os.environ.get("WHATSAPP_API", "http://127.0.0.1:3001").rstrip("/")
+        self.ke = [x.strip() for x in os.environ.get("WHATSAPP_KE", "").split(",") if x.strip()]
+        self.aktif = bool(self.ke)
+        self.proses = None
 
-    @staticmethod
-    def _chat_id(x):
-        x = x.strip()
-        if "@" in x:
-            return x  # contoh kumpulan: 120363012345678901@g.us
-        x = re.sub(r"\D", "", x)
-        if x.startswith("0"):
-            x = "6" + x  # 0123456789 -> 60123456789 (Malaysia)
-        return x + "@c.us"
+    def status(self):
+        try:
+            return json.loads(urllib.request.urlopen(self.url + "/status", timeout=1).read())
+        except Exception:
+            return {"status": "tiada", "nombor": None, "qr": None}
 
-    def hantar(self, teks, img):
-        url = f"{self.base}/waInstance{self.instance}/"
-        for chat in self.ke:
-            if img is None:
-                _post_json(url + f"sendMessage/{self.token}", {"chatId": chat, "message": teks})
-            else:
-                _post_multipart(url + f"sendFileByUpload/{self.token}", {"chatId": chat, "caption": teks},
-                                "file", _jpg(img))
-
-
-class WhatsAppCallMeBot:
-    """WhatsApp teks sahaja melalui CallMeBot (percuma, hanya ke nombor yang mendaftar)."""
-    nama = "WhatsApp (CallMeBot)"
-    URL = "https://api.callmebot.com/whatsapp.php"
-
-    def __init__(self):
-        self.penerima = []  # [(nombor, apikey)]
-        for x in os.environ.get("CALLMEBOT", "").split(","):
-            if ":" in x:
-                no, key = x.split(":", 1)
-                no = re.sub(r"\D", "", no)
-                self.penerima.append(("6" + no if no.startswith("0") else no, key.strip()))
-        self.aktif = bool(self.penerima)
+    def mula(self):
+        """Jalankan whatsapp/server.mjs jika belum berjalan."""
+        if self.status()["status"] != "tiada":
+            return
+        node = shutil.which("node")
+        if not node:
+            print("[whatsapp] Node.js tiada. Pasang dahulu: brew install node")
+            return
+        if not (WA_DIR / "node_modules").exists():
+            print("[whatsapp] Jalankan sekali dahulu:  cd whatsapp && npm install")
+            return
+        port = urllib.parse.urlparse(self.url).port or 3001
+        self.proses = subprocess.Popen([node, "server.mjs"], cwd=WA_DIR, env={**os.environ, "WA_PORT": str(port)})
+        atexit.register(self.proses.terminate)
+        for _ in range(50):  # tunggu API sedia
+            if self.status()["status"] != "tiada":
+                break
+            time.sleep(0.2)
 
     def hantar(self, teks, img):
-        for no, key in self.penerima:
-            q = urllib.parse.urlencode({"phone": "+" + no, "text": teks, "apikey": key})
-            jawapan = urllib.request.urlopen(f"{self.URL}?{q}", timeout=30).read().decode(errors="ignore")
-            if "ERROR" in jawapan.upper() and "MESSAGE QUEUED" not in jawapan.upper():
-                raise RuntimeError(re.sub(r"<[^>]+>", " ", jawapan).strip()[:200])
+        badan = {"ke": self.ke, "teks": teks,
+                 "gambar": base64.b64encode(_jpg(img)).decode() if img is not None else None}
+        try:
+            _post_json(self.url + "/hantar", badan)
+        except urllib.error.HTTPError as e:
+            try:
+                ralat = "; ".join(json.loads(e.read()).get("ralat", [])) or str(e)
+            except ValueError:
+                ralat = str(e)
+            raise RuntimeError(ralat)
+        except urllib.error.URLError:
+            raise RuntimeError("penghantar WhatsApp tidak berjalan")
 
 
 class Notifikasi:
     def __init__(self):
-        self.saluran = [s for s in (Telegram(), WhatsAppGreenAPI(), WhatsAppCallMeBot()) if s.aktif]
+        self.whatsapp = WhatsApp()
+        self.saluran = [s for s in (self.whatsapp, Telegram()) if s.aktif]
+        if self.whatsapp.aktif:
+            self.whatsapp.mula()
 
     @property
     def nama(self):
@@ -704,7 +710,7 @@ def cmd_pantau(a):
         print(f"Page web: {pautan}  (buka dari telefon/komputer dalam WiFi yang sama)")
     notif = Notifikasi()
     stor.notif = notif
-    print("Notifikasi:", ", ".join(notif.nama) or "tiada (lihat README: WhatsApp / Telegram)")
+    print("Notifikasi:", ", ".join(notif.nama) or "tiada (set WHATSAPP_KE untuk WhatsApp, lihat README)")
     senyap = stor.tetapan["senyap"]
     print("Orang yang tidak hantar notifikasi:", ", ".join(senyap) if senyap else "-")
 

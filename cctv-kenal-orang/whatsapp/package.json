@@ -1,0 +1,14 @@
+{
+  "name": "cctv-whatsapp",
+  "private": true,
+  "type": "module",
+  "description": "Penghantar WhatsApp (Baileys) untuk CCTV Kenal Orang",
+  "main": "server.mjs",
+  "scripts": { "start": "node server.mjs" },
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "@whiskeysockets/baileys": "7.0.0-rc14",
+    "pino": "^10.4.0",
+    "qrcode": "^1.5.4"
+  }
+}
