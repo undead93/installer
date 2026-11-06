@@ -73,6 +73,11 @@
   .status { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
   .status .btn { padding: 6px 12px; font-size: 14px; }
   .wa { width: 100%; }
+  .klip-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin-bottom: 14px; }
+  .klip-grid .kad { margin: 0; padding: 10px; }
+  .klip-grid video { width: 100%; border-radius: 8px; background: #000; display: block; aspect-ratio: 16 / 9; }
+  .klip-grid .label { margin-top: 8px; font-weight: 600; }
+  h2 { font-size: 15px; margin: 4px 0 10px; }
   .wa img { display: block; width: 220px; max-width: 100%; margin: 10px 0 6px; border-radius: 8px; background: #fff; padding: 6px; }
   .titik { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--pudar); }
   .titik.ok { background: var(--ok); } .titik.amaran { background: #f59e0b; }
@@ -85,7 +90,7 @@
     <nav>
       <button data-tab="baru" class="aktif">Wajah baru<span class="bil" id="bil-baru" hidden></span></button>
       <button data-tab="orang">Orang berdaftar</button>
-      <button data-tab="log">Log hari ini</button>
+      <button data-tab="log">Log &amp; video</button>
       <button data-tab="langsung">Langsung</button>
     </nav>
   </div>
@@ -116,6 +121,9 @@
   </section>
 
   <section id="t-log" hidden>
+    <h2>Klip video</h2>
+    <div class="klip-grid" id="senarai-klip"></div>
+    <h2>Log hari ini</h2>
     <div class="kad"><table><thead><tr><th>Masa</th><th>Nama</th><th>Skor</th></tr></thead>
       <tbody id="isi-log"></tbody></table></div>
   </section>
@@ -152,6 +160,7 @@ async function post(path, body, jenis = 'application/json') {
 function sibuk() {
   const a = document.activeElement;
   if (a && a.tagName === 'INPUT') return true;
+  if ([...document.querySelectorAll('input.mesej')].some(i => i.value !== i.defaultValue)) return true;
   return [...document.querySelectorAll('#senarai-baru input[type=text]')].some(i => i.value.trim());
 }
 
@@ -230,13 +239,30 @@ function lukisOrang() {
       <label class="suis"><input type="checkbox" class="maklum" ${o.maklum ? 'checked' : ''}>
         <span>Hantar notifikasi bila ${esc(o.nama)} dikesan</span></label>
       <div class="baris">
+        <input type="text" class="mesej" maxlength="200" value="${esc(o.mesej)}"
+               placeholder="✅ ${esc(o.nama)} dikesan di kamera" aria-label="Mesej notifikasi untuk ${esc(o.nama)}">
+        <button class="btn" data-tindakan="mesej">Simpan mesej</button>
+      </div>
+      <div class="baris">
         <button class="btn" data-tindakan="tambah">Tambah gambar</button>
         <button class="btn bahaya" data-tindakan="padam">Padam orang</button>
         <input type="file" class="fail-input" accept="image/*" multiple>
       </div></div>`).join('');
 }
 
+let klipTerakhir = '';
+function lukisKlip() {
+  const kunci = (data.klip || []).map(k => k.url).join('|');
+  if (kunci === klipTerakhir) return;  // jangan ganggu video yang sedang dimainkan
+  klipTerakhir = kunci;
+  $('#senarai-klip').innerHTML = (data.klip || []).length
+    ? data.klip.map(k => `<div class="kad"><video controls playsinline preload="metadata" src="${k.url}#t=0.1"></video>
+        <div class="label">${esc(k.label)}</div><div class="pudar">${esc(k.masa)}</div></div>`).join('')
+    : '<div class="pudar">Belum ada klip. Klip dirakam bila orang dikesan dan notifikasi dihantar.</div>';
+}
+
 function lukisLog() {
+  lukisKlip();
   $('#isi-log').innerHTML = data.log.length
     ? data.log.map(r => `<tr><td>${esc(r[0].slice(11))}</td>
         <td class="${r[1] === 'TIDAK DIKENALI' ? 'asing' : ''}">${esc(r[1])}${r[3] ? ' #' + esc(r[3].slice(-4)) : ''}</td>
@@ -320,6 +346,13 @@ $('#senarai-orang').addEventListener('click', async e => {
     }
     const t = e.target.closest('[data-tindakan]'); if (!t) return;
     if (t.dataset.tindakan === 'tambah') return kad.querySelector('input[type=file]').click();
+    if (t.dataset.tindakan === 'mesej') {
+      const mesej = kad.querySelector('input.mesej').value.trim();
+      await post('/api/mesej', { nama, mesej });
+      document.activeElement && document.activeElement.blur();
+      toast(mesej ? `Mesej disimpan: "${mesej}"` : 'Mesej dikembalikan ke asal');
+      return muat(true);
+    }
     if (t.dataset.tindakan === 'padam') {
       if (!confirm(`Padam ${nama} dan semua gambarnya?`)) return;
       await post('/api/padam-orang', { nama });

@@ -40,7 +40,7 @@ Buka alamat itu dari telefon atau komputer yang guna **WiFi yang sama**.
 |---|---|
 | **Wajah baru** | Kad untuk setiap orang yang belum dikenali. Taip nama dan tekan Simpan. Ketik gambar yang salah orang supaya ia tidak disimpan. Butang "Mungkin Ali?" muncul jika wajah itu mirip orang yang sudah berdaftar. |
 | **Orang berdaftar** | Senarai orang dan gambar mereka. Anda boleh tambah orang baru dengan memuat naik gambar dari telefon, padam gambar yang salah, atau padam orang. |
-| **Log hari ini** | Siapa dikesan dan bila. |
+| **Log & video** | Klip video setiap notifikasi, dan senarai siapa dikesan hari ini. |
 | **Langsung** | Video kamera dengan label nama. |
 
 Untuk letak kata laluan pada page web:
@@ -72,14 +72,22 @@ URL RTSP jenama lain:
 | `orang/<nama>/` | Gambar orang berdaftar. Anda juga boleh letak gambar di sini secara manual, kemudian jalankan `python3 cctv_kenal.py daftar`. |
 | `wajah_baru/` | Wajah orang tidak dikenali yang belum dinamakan. Dipadam sendiri selepas 14 hari (`--simpan-hari`). |
 | `log/YYYY-MM-DD.csv` | Rekod masa, nama dan skor. Boleh dijadikan rekod kehadiran. |
+| `klip/` | Klip video yang dihantar bersama notifikasi. Dipadam sendiri selepas 14 hari. |
 | `tangkapan/` | Gambar penuh semasa orang tidak dikenali dikesan. |
 
 ## Notifikasi WhatsApp (Baileys)
 
-Bila **orang berdaftar** dikesan, sistem hantar mesej WhatsApp **dengan gambar**:
+Bila **orang berdaftar** dikesan, sistem hantar mesej WhatsApp **bersama klip video pendek**
+(3 saat sebelum hingga 5 saat selepas orang itu dikesan), dengan nama dilabel pada wajah:
 
-    ✅ Ali dikesan di kamera
-    🕒 06/11 10:32 AM
+    🏠 Isteri dah balik
+    🎒 Anak dah balik sekolah
+    🕒 06/11 6:45 PM
+
+- **Mesej khas setiap orang:** dalam tab **Orang berdaftar**, taip mesej (contohnya `🏠 Isteri dah balik`) dan tekan **Simpan mesej**.
+  Kalau dibiarkan kosong, mesej asal `✅ <nama> dikesan di kamera` akan digunakan.
+- Kalau beberapa orang sampai **serentak** (dalam 3 saat yang sama), mereka digabung dalam **satu** mesej dan satu video.
+- Semua klip disimpan dalam `klip/` dan boleh ditonton dalam tab **Log & video** di page web. Klip dipadam sendiri selepas 14 hari (`--simpan-hari`).
 
 Sistem juga hantar mesej bila **orang tidak dikenali** dikesan, bersama pautan ke page web untuk namakan orang itu.
 
@@ -121,6 +129,18 @@ supaya WhatsApp tidak memutuskan peranti yang dipautkan.
 - Untuk orang yang sama, notifikasi hanya dihantar sekali setiap 10 minit. Ubah dengan `--cooldown-maklum 1800` (30 minit).
 - Untuk tutup notifikasi orang tidak dikenali, guna `--tanpa-maklum-asing`.
 - Untuk cuba tanpa menghantar mesej sebenar, guna `WA_KERING=1`. Mesej akan dicetak dalam terminal sahaja.
+
+### Tetapan klip video
+
+| Pilihan | Default | Maksud |
+|---|---|---|
+| `--klip-sebelum` | 3 | Saat video **sebelum** orang dikesan. |
+| `--klip-selepas` | 5 | Saat video **selepas** orang dikesan. Notifikasi dihantar selepas tempoh ini tamat. |
+| `--klip-lebar` | 854 | Resolusi klip (854 = 480p). Guna 1280 untuk 720p, tetapi fail lebih besar dan perlukan lebih RAM. |
+| `--tanpa-video` | – | Hantar gambar sahaja, tanpa video. |
+
+Video ditukar ke format MP4 (H.264) menggunakan ffmpeg dari pakej `imageio-ffmpeg`, yang dipasang bersama
+`pip install -r requirements.txt`. Tiada pemasangan lain diperlukan.
 
 Baileys bukan aplikasi rasmi WhatsApp. Kalau terlalu banyak mesej dihantar, nombor itu boleh disekat.
 Sebab itu guna nombor kedua, dan kekalkan cooldown notifikasi.

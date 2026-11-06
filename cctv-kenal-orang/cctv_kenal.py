@@ -11,6 +11,7 @@ Guna OpenCV sahaja (YuNet untuk kesan wajah, SFace untuk kenal wajah).
 import argparse
 import atexit
 import base64
+import bisect
 import csv
 import json
 import os
@@ -25,6 +26,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+from collections import deque
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -38,6 +40,7 @@ ORANG = ROOT / "orang"            # orang berdaftar: orang/<nama>/*.jpg
 WAJAH_BARU = ROOT / "wajah_baru"  # wajah tidak dikenali, dikumpul ikut orang: wajah_baru/<id>/*.jpg
 LOG_DIR = ROOT / "log"
 TANGKAPAN = ROOT / "tangkapan"    # gambar penuh semasa orang tidak dikenali dikesan
+KLIP_DIR = ROOT / "klip"          # klip video yang dihantar bersama notifikasi
 HALAMAN = ROOT / "halaman.html"
 WA_DIR = ROOT / "whatsapp"         # penghantar WhatsApp (Baileys, Node.js)
 TETAPAN = ROOT / "tetapan.json"   # siapa yang tidak hantar notifikasi, dll
@@ -151,6 +154,7 @@ class Stor:
         except (OSError, ValueError):
             self.tetapan = {}
         self.tetapan.setdefault("senyap", [])  # orang berdaftar yang TIDAK hantar notifikasi
+        self.tetapan.setdefault("mesej", {})   # mesej notifikasi khas, cth {"Isteri": "🏠 Isteri dah balik"}
         ORANG.mkdir(exist_ok=True)
         WAJAH_BARU.mkdir(exist_ok=True)
         self.muat_orang()
@@ -264,6 +268,10 @@ class Stor:
         with self.kunci:
             for kid in [k for k, v in self.kumpulan.items() if v["akhir_lihat"] < had]:
                 self.buang_kumpulan(kid)
+        if KLIP_DIR.is_dir():
+            for f in KLIP_DIR.glob("*.mp4"):
+                if f.stat().st_mtime < had:
+                    f.unlink(missing_ok=True)
 
     # ---- tindakan dari page web
     @staticmethod
@@ -321,10 +329,28 @@ class Stor:
             self.muat_orang()
             if nama in self.tetapan["senyap"]:
                 self.set_maklum(nama, True)
+            if nama in self.tetapan["mesej"]:
+                self.set_mesej(nama, "")
 
     # ---- notifikasi bagi setiap orang
     def maklum_hidup(self, nama):
         return nama not in self.tetapan["senyap"]
+
+    def mesej_untuk(self, nama):
+        return self.tetapan["mesej"].get(nama) or f"✅ {nama} dikesan di kamera"
+
+    def set_mesej(self, nama, mesej):
+        nama = self.semak_nama(nama)
+        mesej = (mesej or "").strip()[:200]
+        with self.kunci:
+            if mesej:
+                self.tetapan["mesej"][nama] = mesej
+            else:
+                self.tetapan["mesej"].pop(nama, None)
+            self._simpan_tetapan()
+
+    def _simpan_tetapan(self):
+        TETAPAN.write_text(json.dumps(self.tetapan, indent=2, ensure_ascii=False))
 
     def set_maklum(self, nama, hidup):
         nama = self.semak_nama(nama)
@@ -332,7 +358,7 @@ class Stor:
             senyap = set(self.tetapan["senyap"])
             senyap.discard(nama) if hidup else senyap.add(nama)
             self.tetapan["senyap"] = sorted(senyap)
-            TETAPAN.write_text(json.dumps(self.tetapan, indent=2, ensure_ascii=False))
+            self._simpan_tetapan()
 
     def tambah_gambar(self, nama, data):
         nama = self.semak_nama(nama)
@@ -376,12 +402,22 @@ class Stor:
             orang = []
             for d in sorted(p for p in ORANG.iterdir() if p.is_dir()):
                 gambar = [{"url": url(p), "rel": str(p.relative_to(ROOT))} for p in senarai_gambar(d)]
-                orang.append({"nama": d.name, "gambar": gambar, "maklum": self.maklum_hidup(d.name)})
+                orang.append({"nama": d.name, "gambar": gambar, "maklum": self.maklum_hidup(d.name),
+                              "mesej": self.tetapan["mesej"].get(d.name, "")})
         log = []
         if self.log_path and self.log_path.exists():
             with open(self.log_path, newline="") as fh:
                 log = list(csv.reader(fh))[1:][-200:][::-1]
-        return {"baru": baru, "orang": orang, "log": log,
+        klip = []
+        if KLIP_DIR.is_dir():
+            for f in sorted(KLIP_DIR.glob("*.mp4"), reverse=True)[:30]:
+                try:
+                    masa = datetime.strptime(f.name[:15], "%Y%m%d-%H%M%S").strftime("%d/%m %I:%M %p")
+                except ValueError:
+                    masa = ""
+                klip.append({"url": "/klip/" + urllib.parse.quote(f.name), "masa": masa,
+                             "label": f.stem[16:].replace("+", ", ").replace("_", " ")})
+        return {"baru": baru, "orang": orang, "log": log, "klip": klip,
                 "saluran": self.notif.nama if self.notif else [],
                 "whatsapp": self.notif.whatsapp.status()
                 if self.notif and self.notif.whatsapp.aktif else None}
@@ -450,12 +486,43 @@ def mula_web(stor, port, kata_laluan):
                     self._hantar(200, "image/jpeg", p.read_bytes())
                 elif path == "/strim":
                     self._strim()
+                elif path.startswith("/klip/"):
+                    self._klip(urllib.parse.unquote(path[len("/klip/"):]))
                 else:
                     self._hantar(404, "text/plain", b"tiada")
             except ValueError as e:
                 self._json({"ralat": str(e)}, 400)
             except (BrokenPipeError, ConnectionResetError):
                 pass
+
+        def _klip(self, nama):
+            p = (KLIP_DIR / nama).resolve()
+            if p.parent != KLIP_DIR.resolve() or p.suffix != ".mp4" or not p.exists():
+                return self._hantar(404, "text/plain", b"tiada")
+            data = p.read_bytes()
+            m = re.match(r"bytes=(\d*)-(\d*)", self.headers.get("Range", ""))
+            if not m or not (m[1] or m[2]):
+                self.send_response(200)
+                self.send_header("Accept-Ranges", "bytes")
+                self.send_header("Content-Type", "video/mp4")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                return self.wfile.write(data)
+            if m[1]:
+                mula, akhir = int(m[1]), min(int(m[2]) if m[2] else len(data) - 1, len(data) - 1)
+            else:
+                mula, akhir = max(0, len(data) - int(m[2])), len(data) - 1
+            if mula > akhir:
+                self.send_response(416)
+                self.send_header("Content-Range", f"bytes */{len(data)}")
+                return self.end_headers()
+            self.send_response(206)
+            self.send_header("Accept-Ranges", "bytes")
+            self.send_header("Content-Type", "video/mp4")
+            self.send_header("Content-Range", f"bytes {mula}-{akhir}/{len(data)}")
+            self.send_header("Content-Length", str(akhir - mula + 1))
+            self.end_headers()
+            self.wfile.write(data[mula:akhir + 1])
 
         def _strim(self):
             self.send_response(200)
@@ -498,6 +565,8 @@ def mula_web(stor, port, kata_laluan):
                     stor.padam_orang(d.get("nama"))
                 elif url.path == "/api/maklum":
                     stor.set_maklum(d.get("nama"), bool(d.get("hidup")))
+                elif url.path == "/api/mesej":
+                    stor.set_mesej(d.get("nama"), d.get("mesej", ""))
                 elif url.path == "/api/uji-maklum":
                     if not stor.notif or not stor.notif.saluran:
                         raise ValueError("Notifikasi belum disetkan. Set WHATSAPP_KE (lihat README).")
@@ -524,19 +593,19 @@ def _jpg(img):
     return cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 85])[1].tobytes()
 
 
-def _post_multipart(url, medan, nama_fail_medan, jpg):
+def _post_multipart(url, medan, nama_fail_medan, data, nama_fail="cctv.jpg", jenis="image/jpeg"):
     b = uuid.uuid4().hex
     body = b"".join(f"--{b}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n".encode()
                     for k, v in medan.items())
-    body += (f"--{b}\r\nContent-Disposition: form-data; name=\"{nama_fail_medan}\"; filename=\"cctv.jpg\"\r\n"
-             f"Content-Type: image/jpeg\r\n\r\n").encode() + jpg + f"\r\n--{b}--\r\n".encode()
+    body += (f"--{b}\r\nContent-Disposition: form-data; name=\"{nama_fail_medan}\"; filename=\"{nama_fail}\"\r\n"
+             f"Content-Type: {jenis}\r\n\r\n").encode() + data + f"\r\n--{b}--\r\n".encode()
     req = urllib.request.Request(url, body, {"Content-Type": f"multipart/form-data; boundary={b}"})
-    return urllib.request.urlopen(req, timeout=30).read()
+    return urllib.request.urlopen(req, timeout=120).read()
 
 
-def _post_json(url, obj):
+def _post_json(url, obj, timeout=30):
     req = urllib.request.Request(url, json.dumps(obj).encode(), {"Content-Type": "application/json"})
-    return urllib.request.urlopen(req, timeout=30).read()
+    return urllib.request.urlopen(req, timeout=timeout).read()
 
 
 class Telegram:
@@ -547,9 +616,12 @@ class Telegram:
         self.chat = os.environ.get("TELEGRAM_CHAT_ID")
         self.aktif = bool(self.token and self.chat)
 
-    def hantar(self, teks, img):
+    def hantar(self, teks, img, video=None):
         url = f"https://api.telegram.org/bot{self.token}/"
-        if img is None:
+        if video:
+            _post_multipart(url + "sendVideo", {"chat_id": self.chat, "caption": teks, "supports_streaming": "true"},
+                            "video", video, "cctv.mp4", "video/mp4")
+        elif img is None:
             _post_json(url + "sendMessage", {"chat_id": self.chat, "text": teks})
         else:
             _post_multipart(url + "sendPhoto", {"chat_id": self.chat, "caption": teks}, "photo", _jpg(img))
@@ -590,11 +662,12 @@ class WhatsApp:
                 break
             time.sleep(0.2)
 
-    def hantar(self, teks, img):
+    def hantar(self, teks, img, video=None):
         badan = {"ke": self.ke, "teks": teks,
-                 "gambar": base64.b64encode(_jpg(img)).decode() if img is not None else None}
+                 "gambar": base64.b64encode(_jpg(img)).decode() if img is not None and not video else None,
+                 "video": base64.b64encode(video).decode() if video else None}
         try:
-            _post_json(self.url + "/hantar", badan)
+            _post_json(self.url + "/hantar", badan, timeout=180 if video else 60)
         except urllib.error.HTTPError as e:
             try:
                 ralat = "; ".join(json.loads(e.read()).get("ralat", [])) or str(e)
@@ -616,32 +689,111 @@ class Notifikasi:
     def nama(self):
         return [s.nama for s in self.saluran]
 
-    def hantar_segera(self, teks, img=None):
+    def hantar_segera(self, teks, img=None, video=None):
         """Hantar ke semua saluran sekarang. -> senarai ralat"""
         ralat = []
         for s in self.saluran:
             try:
-                s.hantar(teks, img)
+                s.hantar(teks, img, video)
             except Exception as e:
                 print(f"[{s.nama}] gagal: {e}")
                 ralat.append(f"{s.nama}: {e}")
         return ralat
 
-    def hantar(self, teks, img=None):
+    def hantar(self, teks, img=None, video=None):
         if self.saluran:
-            threading.Thread(target=self.hantar_segera, args=(teks, img), daemon=True).start()
+            threading.Thread(target=self.hantar_segera, args=(teks, img, video), daemon=True).start()
+
+
+# ---------------------------------------------------------------- klip video
+def ffmpeg_exe():
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        return shutil.which("ffmpeg")
+
+
+def _tulis_teks(img, teks, org, skala, warna):
+    x, y = org
+    for dx, dy in ((-1, -1), (1, -1), (-1, 1), (1, 1), (0, 2), (2, 0), (0, -2), (-2, 0)):  # garis luar hitam
+        cv2.putText(img, teks, (x + dx, y + dy), cv2.FONT_HERSHEY_SIMPLEX, skala, (0, 0, 0), 1, cv2.LINE_AA)
+    cv2.putText(img, teks, org, cv2.FONT_HERSHEY_SIMPLEX, skala, warna, 1, cv2.LINE_AA)
+
+
+def buat_video(bingkai, anotasi, laluan):
+    """bingkai: [(masa, img)], anotasi: [(masa, lebar_asal, [(x, y, w, h, label, warna)])].
+    Tulis MP4 H.264 (boleh dimainkan dalam WhatsApp) ke `laluan`. -> bait video atau None"""
+    exe = ffmpeg_exe()
+    if not exe:
+        print("[klip] ffmpeg tiada. Pasang: pip install imageio-ffmpeg")
+        return None
+    if len(bingkai) < 2:
+        return None
+    h, w = bingkai[0][1].shape[:2]
+    tempoh = bingkai[-1][0] - bingkai[0][0]
+    fps = min(30.0, max(2.0, (len(bingkai) - 1) / tempoh)) if tempoh > 0 else 10.0
+    anotasi = sorted(anotasi, key=lambda a: a[0])
+    masa_a = [a[0] for a in anotasi]
+    laluan.parent.mkdir(exist_ok=True)
+    p = subprocess.Popen([exe, "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "bgr24",
+                          "-s", f"{w}x{h}", "-r", f"{fps:.3f}", "-i", "-",
+                          "-c:v", "libx264", "-preset", "veryfast", "-crf", "26", "-pix_fmt", "yuv420p",
+                          "-movflags", "+faststart", str(laluan)],
+                         stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        for t, f in bingkai:
+            f = cv2.resize(f, (w, h)) if f.shape[:2] != (h, w) else f.copy()
+            i = bisect.bisect_right(masa_a, t + 0.1) - 1  # anotasi terkini (dalam 0.6 saat)
+            if i >= 0 and t - masa_a[i] < 0.6:
+                s = w / anotasi[i][1]
+                for x, y, bw, bh, label, warna in anotasi[i][2]:
+                    x, y, bw, bh = int(x * s), int(y * s), int(bw * s), int(bh * s)
+                    cv2.rectangle(f, (x, y), (x + bw, y + bh), warna, 2)
+                    _tulis_teks(f, label, (x, max(14, y - 6)), 0.5, warna)
+            _tulis_teks(f, datetime.fromtimestamp(t).strftime("%d/%m/%Y %H:%M:%S"), (8, 22), 0.6, (255, 255, 255))
+            p.stdin.write(f.tobytes())
+        p.stdin.close()
+        p.wait(timeout=60)
+    except (BrokenPipeError, subprocess.TimeoutExpired):
+        p.kill()
+    if p.returncode != 0 or not laluan.exists():
+        print(f"[klip] gagal buat video: {p.stderr.read().decode(errors='ignore')[:300]}")
+        return None
+    return laluan.read_bytes()
+
+
+class Klip:
+    """Satu klip yang sedang dirakam: bingkai sebelum + selepas orang dikesan."""
+
+    def __init__(self, awal, t_mula, t_tamat):
+        self.bingkai = list(awal)
+        self.t_mula, self.t_tamat = t_mula, t_tamat
+        self.masa_dinding = time.time()
+        self.baris = []        # baris mesej, cth ["🏠 Isteri dah balik", "🏠 Adik dah balik"]
+        self.label = []        # untuk nama fail
+        self.asing = False     # ada orang tidak dikenali -> sertakan pautan page web
+        self.img = None        # gambar penuh (jika video gagal)
+        self.siap = threading.Event()
 
 
 # ---------------------------------------------------------------- kamera
 class Kamera:
     """Baca bingkai dalam thread supaya sentiasa dapat bingkai terkini (elak lag RTSP)."""
 
-    def __init__(self, sumber):
+    def __init__(self, sumber, sebelum=3.0, lebar_klip=854):
         self.sumber = int(sumber) if str(sumber).isdigit() else sumber
         self.fail_video = isinstance(self.sumber, str) and Path(self.sumber).is_file()
         self.bingkai, self.tamat = None, False
         self.kunci = threading.Lock()
+        # penimbal klip: bingkai kecil beberapa saat terakhir
+        self.sebelum, self.lebar_klip = sebelum, lebar_klip
+        self.penimbal, self.klip_aktif = deque(), []
+        self.kunci_klip = threading.Lock()
+        self.masa = self.t_akhir = 0.0
+        self.idx, self.t0 = 0, time.time()
         self._buka()
+        self.fps_fail = (self.cap.get(cv2.CAP_PROP_FPS) or 15) if self.fail_video else 0
         if not self.fail_video:
             threading.Thread(target=self._loop, daemon=True).start()
 
@@ -661,21 +813,58 @@ class Kamera:
                 time.sleep(3)
                 self._buka()
                 continue
+            t = self._terima(f)
             with self.kunci:
-                self.bingkai = f
+                self.bingkai = (t, f)
+
+    def _terima(self, f):
+        """Masukkan bingkai ke penimbal klip. -> masa bingkai"""
+        t = self.t0 + self.idx / self.fps_fail if self.fail_video else time.time()
+        self.idx += 1
+        if not self.lebar_klip:
+            return t
+        h, w = f.shape[:2]
+        s = self.lebar_klip / w
+        kecil = cv2.resize(f, (self.lebar_klip // 2 * 2, int(h * s) // 2 * 2)) if s < 1 else f[:h // 2 * 2, :w // 2 * 2]
+        with self.kunci_klip:
+            self.t_akhir = t
+            self.penimbal.append((t, kecil))
+            while self.penimbal and self.penimbal[0][0] < t - self.sebelum:
+                self.penimbal.popleft()
+            for k in self.klip_aktif[:]:
+                k.bingkai.append((t, kecil))
+                if t >= k.t_tamat:
+                    self.klip_aktif.remove(k)
+                    k.siap.set()
+        return t
+
+    def mula_klip(self, selepas):
+        with self.kunci_klip:
+            k = Klip(self.penimbal, self.t_akhir, self.t_akhir + selepas)
+            self.klip_aktif.append(k)
+            return k
 
     def baca(self):
         if self.fail_video:  # fail video: baca berturutan
             ok, f = self.cap.read()
             if not ok:
                 self.tamat = True
-            return f if ok else None
+                return None
+            self.masa = self._terima(f)
+            return f
         with self.kunci:
-            f, self.bingkai = self.bingkai, None
-        return f
+            b, self.bingkai = self.bingkai, None
+        if b is None:
+            return None
+        self.masa = b[0]
+        return b[1]
 
     def tutup(self):
         self.tamat = True
+        with self.kunci_klip:
+            for k in self.klip_aktif:
+                k.siap.set()
+            self.klip_aktif = []
         self.cap.release()
 
 
@@ -716,7 +905,30 @@ def cmd_pantau(a):
 
     kali_akhir = {}  # kunci -> masa terakhir dilog (untuk cooldown)
     kali_maklum = {}  # kunci -> masa terakhir notifikasi dihantar
-    kam = Kamera(a.sumber)
+    guna_video = not a.tanpa_video and bool(ffmpeg_exe())
+    if not a.tanpa_video and not guna_video:
+        print("Klip video: tidak aktif - ffmpeg tiada (pip install imageio-ffmpeg)")
+    else:
+        print("Klip video:", f"{a.klip_sebelum:g}s sebelum + {a.klip_selepas:g}s selepas" if guna_video else "dimatikan")
+    kam = Kamera(a.sumber, a.klip_sebelum, a.klip_lebar if guna_video else 0)
+    anotasi = deque(maxlen=600)  # kotak wajah terkini untuk dilukis dalam klip
+    klip_semasa = None
+    threads_klip = []
+
+    def susun_teks(baris, masa_dinding, asing):
+        t = "\n".join(baris) + f"\n🕒 {datetime.fromtimestamp(masa_dinding):%d/%m %I:%M %p}"
+        return t + (f"\nNamakan di {pautan}" if asing and pautan else "")
+
+    def hantar_klip(k):
+        k.siap.wait(timeout=a.klip_selepas + 60)
+        with kam.kunci_klip:
+            bingkai = list(k.bingkai)
+        label = "+".join(dict.fromkeys(re.sub(r"[^\w-]+", "_", x) for x in k.label))[:80]
+        laluan = KLIP_DIR / f"{datetime.fromtimestamp(k.masa_dinding):%Y%m%d-%H%M%S}_{label}.mp4"
+        video = buat_video(bingkai, list(anotasi), laluan)
+        teks = susun_teks(k.baris, k.masa_dinding, k.asing)
+        if k.baris:
+            notif.hantar_segera(teks, k.img, video)
     penulis = None
     t_proses = t_bersih = 0.0
     print("Memantau... tekan Ctrl+C (atau 'q' dalam tetingkap) untuk berhenti.")
@@ -731,6 +943,7 @@ def cmd_pantau(a):
                 time.sleep(0.01)
                 continue
             sekarang = t_proses = time.time()
+            kotak = []
             if sekarang - t_bersih > 3600:
                 stor.bersih(a.simpan_hari)
                 t_bersih = sekarang
@@ -750,12 +963,12 @@ def cmd_pantau(a):
                 cv2.rectangle(img, (x, y), (x + w, y + h), warna, 2)
                 cv2.putText(img, f"{label} {skor:.2f}", (x, max(0, y - 8)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, warna, 2)
+                kotak.append((x, y, w, h, label, warna))
 
                 if sekarang - kali_akhir.get(kunci, 0) < a.cooldown:
                     continue
                 kali_akhir[kunci] = sekarang
                 masa = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                masa_pendek = datetime.now().strftime("%d/%m %I:%M %p")
                 log.writerow([masa, nama or "TIDAK DIKENALI", f"{skor:.3f}", kid or ""])
                 log_f.flush()
                 print(f"{masa}  {label:<22} skor={skor:.2f}")
@@ -764,15 +977,28 @@ def cmd_pantau(a):
                 if sekarang - kali_maklum.get(kunci, 0) < a.cooldown_maklum and not kumpulan_baru:
                     continue
                 if nama is None and not a.tanpa_maklum_asing:
-                    teks = ("🆕 Orang baru tidak dikenali" if kumpulan_baru else "⚠️ Orang tidak dikenali")
-                    teks += f"\n🕒 {masa_pendek}" + (f"\nNamakan di {pautan}" if pautan else "")
+                    baris = "🆕 Orang baru tidak dikenali" if kumpulan_baru else "⚠️ Orang tidak dikenali"
                 elif nama is not None and stor.maklum_hidup(nama):
-                    teks = f"✅ {nama} dikesan di kamera\n🕒 {masa_pendek}"
+                    baris = stor.mesej_untuk(nama)
                 else:
                     continue
                 kali_maklum[kunci] = sekarang
-                notif.hantar(teks, img)
+                if not guna_video:
+                    notif.hantar(susun_teks([baris], sekarang, nama is None), img)
+                    continue
+                # gabungkan orang yang dikesan dalam 3 saat yang sama ke dalam satu klip
+                if klip_semasa is None or klip_semasa.siap.is_set() or kam.masa - klip_semasa.t_mula > 3:
+                    klip_semasa = kam.mula_klip(a.klip_selepas)
+                    klip_semasa.img = img
+                    th = threading.Thread(target=hantar_klip, args=(klip_semasa,), daemon=True)
+                    th.start()
+                    threads_klip.append(th)
+                klip_semasa.baris.append(baris)
+                klip_semasa.label.append(nama or "TIDAK-DIKENALI")
+                klip_semasa.asing |= nama is None
 
+            if kotak:
+                anotasi.append((kam.masa, img.shape[1], kotak))
             stor.set_bingkai(img)
             if a.rakam:
                 if penulis is None:
@@ -783,6 +1009,10 @@ def cmd_pantau(a):
                 cv2.imshow("CCTV kenal orang", img)
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
+        if kam.fail_video:
+            kam.tutup()  # siapkan klip yang masih dirakam
+            for th in threads_klip:
+                th.join(timeout=120)
         if kam.fail_video and a.port and a.kekal:
             print("Video tamat. Page web masih berjalan - Ctrl+C untuk berhenti.")
             while True:
@@ -828,6 +1058,10 @@ def main():
                    help="saat sebelum notifikasi untuk orang yang sama dihantar semula. Default 600 (10 min)")
     m.add_argument("--tanpa-maklum-asing", action="store_true",
                    help="jangan hantar notifikasi untuk orang tidak dikenali")
+    m.add_argument("--tanpa-video", action="store_true", help="hantar gambar sahaja, tanpa klip video")
+    m.add_argument("--klip-sebelum", type=float, default=3, help="saat video sebelum orang dikesan. Default 3")
+    m.add_argument("--klip-selepas", type=float, default=5, help="saat video selepas orang dikesan. Default 5")
+    m.add_argument("--klip-lebar", type=int, default=854, help="lebar video klip (piksel). Default 854 (480p)")
     m.add_argument("--kekal", action="store_true", help=argparse.SUPPRESS)  # untuk ujian dengan fail video
     m.set_defaults(fn=cmd_pantau)
 

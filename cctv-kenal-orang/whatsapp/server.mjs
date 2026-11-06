@@ -4,7 +4,7 @@
 // API (hanya dari komputer ini, 127.0.0.1):
 //   GET  /status    -> { status, nombor, qr }   qr = gambar QR (data URL) semasa perlu diimbas
 //   GET  /kumpulan  -> senarai kumpulan WhatsApp { id, nama }
-//   POST /hantar    { ke: ["0123456789", "1203...@g.us"], teks, gambar?: base64 JPEG }
+//   POST /hantar    { ke: ["0123456789", "1203...@g.us"], teks, gambar?: base64 JPEG, video?: base64 MP4 }
 import { makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers, fetchLatestBaileysVersion } from '@whiskeysockets/baileys'
 import QRCode from 'qrcode'
 import pino from 'pino'
@@ -76,17 +76,20 @@ function jid (ke) {
   return n + '@s.whatsapp.net'
 }
 
-async function hantar ({ ke = [], teks = '', gambar = null }) {
+async function hantar ({ ke = [], teks = '', gambar = null, video = null }) {
   const ralat = []
   const img = gambar ? Buffer.from(gambar, 'base64') : null
+  const vid = video ? Buffer.from(video, 'base64') : null
   for (const k of ke) {
     try {
       if (KERING) {
-        log(`[KERING] ke ${jid(k)}: ${teks.replace(/\n/g, ' | ')}${img ? ` (+gambar ${img.length} bait)` : ''}`)
+        log(`[KERING] ke ${jid(k)}: ${teks.replace(/\n/g, ' | ')}${img ? ` (+gambar ${img.length} bait)` : ''}${vid ? ` (+video ${vid.length} bait)` : ''}`)
         continue
       }
       if (status !== 'bersambung') throw new Error('WhatsApp belum bersambung (imbas QR dahulu)')
-      await sock.sendMessage(jid(k), img ? { image: img, caption: teks } : { text: teks })
+      const mesej = vid ? { video: vid, caption: teks, mimetype: 'video/mp4' }
+        : img ? { image: img, caption: teks } : { text: teks }
+      await sock.sendMessage(jid(k), mesej)
       await new Promise(r => setTimeout(r, 700))  // jarakkan mesej
     } catch (e) {
       ralat.push(`${k}: ${e.message}`)
@@ -116,9 +119,9 @@ http.createServer(async (req, res) => {
       return json(res, 200, Object.values(g).map(x => ({ id: x.id, nama: x.subject })))
     }
     if (req.method === 'POST' && req.url === '/hantar') {
-      let badan = ''
-      for await (const c of req) badan += c
-      const ralat = await hantar(JSON.parse(badan || '{}'))
+      const bahagian = []
+      for await (const c of req) bahagian.push(c)
+      const ralat = await hantar(JSON.parse(Buffer.concat(bahagian).toString() || '{}'))
       return json(res, ralat.length ? 502 : 200, { ok: !ralat.length, ralat })
     }
     json(res, 404, { ralat: 'tiada' })
