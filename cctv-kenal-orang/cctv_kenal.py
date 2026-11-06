@@ -617,7 +617,7 @@ def mula_web(stor, port, kata_laluan):
                     self._hantar(404, "text/plain", b"tiada")
             except ValueError as e:
                 self._json({"ralat": str(e)}, 400)
-            except (BrokenPipeError, ConnectionResetError):
+            except ConnectionError:  # telefon tutup paparan (BrokenPipe / Reset / Windows 10053 Aborted)
                 pass
 
         def _klip(self, nama):
@@ -708,7 +708,13 @@ def mula_web(stor, port, kata_laluan):
             except ValueError as e:
                 self._json({"ralat": str(e)}, 400)
 
-    srv = ThreadingHTTPServer(("0.0.0.0", port), H)
+    class Pelayan(ThreadingHTTPServer):
+        def handle_error(self, request, client_address):
+            if isinstance(sys.exc_info()[1], ConnectionError):
+                return  # pelayar ditutup di tengah jalan: perkara biasa, tak perlu dicetak
+            super().handle_error(request, client_address)
+
+    srv = Pelayan(("0.0.0.0", port), H)
     srv.daemon_threads = True
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return f"http://{ip_lan()}:{port}"
