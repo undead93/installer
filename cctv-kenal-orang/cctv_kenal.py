@@ -150,7 +150,7 @@ class Stor:
         self.log_path = None
         self.notif = None
         try:
-            self.tetapan = json.loads(TETAPAN.read_text())
+            self.tetapan = json.loads(TETAPAN.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             self.tetapan = {}
         self.tetapan.setdefault("senyap", [])  # orang berdaftar yang TIDAK hantar notifikasi
@@ -270,8 +270,11 @@ class Stor:
                 self.buang_kumpulan(kid)
         if KLIP_DIR.is_dir():
             for f in KLIP_DIR.glob("*.mp4"):
-                if f.stat().st_mtime < had:
-                    f.unlink(missing_ok=True)
+                try:
+                    if f.stat().st_mtime < had:
+                        f.unlink()
+                except OSError:  # sedang dimainkan dalam page web (Windows) - cuba lagi nanti
+                    pass
 
     # ---- tindakan dari page web
     @staticmethod
@@ -350,7 +353,7 @@ class Stor:
             self._simpan_tetapan()
 
     def _simpan_tetapan(self):
-        TETAPAN.write_text(json.dumps(self.tetapan, indent=2, ensure_ascii=False))
+        TETAPAN.write_text(json.dumps(self.tetapan, indent=2, ensure_ascii=False), encoding="utf-8")
 
     def set_maklum(self, nama, hidup):
         nama = self.semak_nama(nama)
@@ -387,7 +390,7 @@ class Stor:
 
     # ---- data untuk page web
     def data(self):
-        url = lambda p: "/fail/" + urllib.parse.quote(str(p.relative_to(ROOT)))
+        url = lambda p: "/fail/" + urllib.parse.quote(p.relative_to(ROOT).as_posix())
         with self.kunci:
             baru = []
             for kid, k in sorted(self.kumpulan.items(), key=lambda kv: -kv[1]["akhir_lihat"]):
@@ -395,18 +398,18 @@ class Stor:
                 cad, skor = self.padan_orang(min_ / (np.linalg.norm(min_) + 1e-9))
                 baru.append({
                     "id": kid, "pendek": kid[-4:],
-                    "gambar": [{"url": url(p), "fail": p.name, "rel": str(p.relative_to(ROOT))} for p in k["fail"]],
+                    "gambar": [{"url": url(p), "fail": p.name, "rel": p.relative_to(ROOT).as_posix()} for p in k["fail"]],
                     "akhir": datetime.fromtimestamp(k["akhir_lihat"]).strftime("%d/%m %H:%M"),
                     "cadangan": cad if cad and skor >= self.ambang - 0.08 else None,
                 })
             orang = []
             for d in sorted(p for p in ORANG.iterdir() if p.is_dir()):
-                gambar = [{"url": url(p), "rel": str(p.relative_to(ROOT))} for p in senarai_gambar(d)]
+                gambar = [{"url": url(p), "rel": p.relative_to(ROOT).as_posix()} for p in senarai_gambar(d)]
                 orang.append({"nama": d.name, "gambar": gambar, "maklum": self.maklum_hidup(d.name),
                               "mesej": self.tetapan["mesej"].get(d.name, "")})
         log = []
         if self.log_path and self.log_path.exists():
-            with open(self.log_path, newline="") as fh:
+            with open(self.log_path, newline="", encoding="utf-8") as fh:
                 log = list(csv.reader(fh))[1:][-200:][::-1]
         klip = []
         if KLIP_DIR.is_dir():
@@ -808,7 +811,7 @@ class PerakamHD:
             try:
                 if f.stat().st_mtime < had:
                     f.unlink()
-            except FileNotFoundError:
+            except OSError:  # sudah dipadam, atau masih dibuka (Windows)
                 pass
 
     def _senarai(self):
@@ -846,9 +849,9 @@ class PerakamHD:
             print("[klip-hd] tiada rakaman untuk tempoh ini")
             return None
         senarai = laluan.with_suffix(".txt")
-        senarai.write_text("".join(f"file '{f.as_posix()}'\n" for f in pilih))
+        senarai.write_text("".join(f"file '{f.as_posix()}'\n" for f in pilih), encoding="utf-8")
         if self.kodek is None:  # semak kodek kamera sekali
-            r = subprocess.run([self.exe, "-hide_banner", "-i", str(pilih[0])], capture_output=True, text=True)
+            r = subprocess.run([self.exe, "-hide_banner", "-i", str(pilih[0])], capture_output=True, text=True, encoding="utf-8", errors="replace")
             self.kodek = "hevc" if "Video: hevc" in r.stderr else "h264"
             if self.kodek == "hevc":
                 print("[klip-hd] kamera guna H.265 - klip akan ditukar ke H.264 supaya boleh dimain di WhatsApp")
@@ -856,7 +859,7 @@ class PerakamHD:
             ["-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-pix_fmt", "yuv420p"]
         r = subprocess.run([self.exe, "-hide_banner", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0",
                             "-i", str(senarai), *video, "-c:a", "copy", "-bsf:a", "aac_adtstoasc",
-                            "-movflags", "+faststart", str(laluan)], capture_output=True, text=True)
+                            "-movflags", "+faststart", str(laluan)], capture_output=True, text=True, encoding="utf-8", errors="replace")
         senarai.unlink(missing_ok=True)
         if r.returncode != 0 or not laluan.exists():
             print(f"[klip-hd] gagal cantum: {r.stderr[:300]}")
@@ -906,7 +909,10 @@ class Kamera:
     def _buka(self):
         if isinstance(self.sumber, str) and self.sumber.startswith("rtsp"):
             os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp")
-        self.cap = cv2.VideoCapture(self.sumber)
+        if isinstance(self.sumber, int) and os.name == "nt":
+            self.cap = cv2.VideoCapture(self.sumber, cv2.CAP_DSHOW)  # webcam Windows: lebih cepat dibuka
+        else:
+            self.cap = cv2.VideoCapture(self.sumber)
         if not self.cap.isOpened():
             print(f"[kamera] tak dapat buka {self.sumber}")
 
@@ -992,7 +998,7 @@ def cmd_pantau(a):
     TANGKAPAN.mkdir(exist_ok=True)
     log_path = LOG_DIR / f"{datetime.now():%Y-%m-%d}.csv"
     baru = not log_path.exists()
-    log_f = open(log_path, "a", newline="")
+    log_f = open(log_path, "a", newline="", encoding="utf-8")
     log = csv.writer(log_f)
     if baru:
         log.writerow(["masa", "nama", "skor", "kumpulan"])
@@ -1157,6 +1163,11 @@ def cmd_pantau(a):
 
 
 def main():
+    for strim in (sys.stdout, sys.stderr):  # elak ralat emoji di konsol Windows
+        try:
+            strim.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     p = argparse.ArgumentParser(description="CCTV kenal orang")
     sub = p.add_subparsers(dest="cmd", required=True)
 

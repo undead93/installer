@@ -49,6 +49,36 @@ Untuk letak kata laluan pada page web:
 
 Untuk tutup page web, guna `--port 0`.
 
+## Guna di Windows
+
+Sistem ini juga berjalan di Windows 10/11, jadi anda boleh cuba dulu sebelum pindah ke Mac.
+
+**1. Pasang alat (sekali sahaja)**
+- **Python 3.11 atau lebih baru:** muat turun dari python.org. Semasa memasang, tanda ✅ **"Add python.exe to PATH"**.
+- **Node.js LTS:** muat turun dari nodejs.org. Ini hanya perlu untuk WhatsApp.
+
+**2. Pasang pakej.** Buka **PowerShell** dalam folder `cctv-kenal-orang` (Shift + klik kanan dalam folder, kemudian *Open PowerShell window here*):
+
+    pip install -r requirements.txt
+    cd whatsapp; npm install; cd ..
+
+**3. Jalankan.** Di Windows, guna `python` (bukan `python3`), dan `$env:` (bukan `export`):
+
+    $env:WHATSAPP_KE="0123456789"
+    python cctv_kenal.py pantau --sumber "rtsp://user:pass@192.168.1.25:554/stream1"
+
+    # atau cuba dengan webcam laptop dahulu:
+    python cctv_kenal.py pantau --sumber 0 --papar
+
+Untuk simpan tetapan, buat fail `tetapan.ps1` yang mengandungi baris-baris `$env:...`, kemudian jalankan `. .\tetapan.ps1` sebelum sistem dimulakan.
+
+**Perkara yang biasa berlaku di Windows:**
+- **Windows Firewall akan bertanya** sama ada Python dibenarkan guna rangkaian. Tanda **Private networks** dan tekan *Allow*. Tanpa kebenaran ini, telefon tak dapat buka page web.
+- `python` membuka Microsoft Store: Python belum dipasang dengan betul. Pasang semula dari python.org dan tanda "Add to PATH".
+- Kalau `npm` disekat oleh *execution policy*, jalankan sekali `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, atau guna Command Prompt (`cmd`). Dalam cmd, guna `set WHATSAPP_KE=0123456789`, bukan `$env:`.
+- Supaya PC tidak tidur, pergi ke Settings, kemudian System, kemudian Power, dan tetapkan *Sleep* kepada **Never** semasa sistem berjalan.
+- Untuk pindah ke Mac nanti, salin folder `orang/`, `whatsapp/auth/` dan fail `tetapan.json`. Wajah yang sudah dinamakan, sesi WhatsApp dan mesej khas akan ikut sekali, jadi tak perlu daftar atau imbas QR semula.
+
 ## Kamera Tapo
 
 1. Dalam app Tapo, buka kamera, tekan ⚙️ Settings, pilih **Advanced Settings**, kemudian **Camera Account**. Buat nama pengguna dan kata laluan. Ini bukan akaun TP-Link anda. Elakkan simbol `@ : / #`.
