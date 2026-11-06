@@ -77,8 +77,8 @@ URL RTSP jenama lain:
 
 ## Notifikasi WhatsApp (Baileys)
 
-Bila **orang berdaftar** dikesan, sistem hantar mesej WhatsApp **bersama klip video pendek**
-(3 saat sebelum hingga 5 saat selepas orang itu dikesan), dengan nama dilabel pada wajah:
+Bila **orang berdaftar** dikesan, sistem hantar mesej WhatsApp **bersama klip video HD**
+(dari 3 saat sebelum hingga 5 saat selepas orang itu dikesan):
 
     🏠 Isteri dah balik
     🎒 Anak dah balik sekolah
@@ -130,20 +130,31 @@ supaya WhatsApp tidak memutuskan peranti yang dipautkan.
 - Untuk tutup notifikasi orang tidak dikenali, guna `--tanpa-maklum-asing`.
 - Untuk cuba tanpa menghantar mesej sebenar, guna `WA_KERING=1`. Mesej akan dicetak dalam terminal sahaja.
 
-### Tetapan klip video
+### Kualiti klip video
+
+**Mod HD (default untuk kamera RTSP seperti Tapo):** strim asal kamera dirakam terus, tanpa ditukar.
+- Resolusi penuh kamera: 2K atau 1080p untuk Tapo `stream1`.
+- **Ada bunyi.** Guna `--tanpa-audio` untuk tutup bunyi.
+- Hampir tidak guna CPU, jadi sesuai untuk Mac mini Intel.
+- Kotak nama tidak dilukis pada video. Nama tetap tertulis dalam mesej, dan Tapo sendiri sudah paparkan masa pada video.
+- Kalau kamera guna H.265, klip ditukar ke H.264 secara automatik supaya boleh dimainkan dalam WhatsApp. Langkah ini guna sedikit CPU.
+- Panjang klip mungkin 1–2 saat lebih daripada yang ditetapkan, kerana rakaman dipotong pada bingkai kunci (keyframe) kamera.
+
+Kalau `--sumber` guna `stream2` (resolusi rendah, jimat CPU untuk kenal wajah), anda masih boleh rakam dari `stream1`:
+
+    python3 cctv_kenal.py pantau --sumber "rtsp://u:p@IP:554/stream2" --sumber-hd "rtsp://u:p@IP:554/stream1"
+
+**Mod label (`--klip-mod label`):** video 480p dengan kotak nama dilukis pada wajah. Mod ini digunakan secara automatik untuk webcam.
 
 | Pilihan | Default | Maksud |
 |---|---|---|
 | `--klip-sebelum` | 3 | Saat video **sebelum** orang dikesan. |
 | `--klip-selepas` | 5 | Saat video **selepas** orang dikesan. Notifikasi dihantar selepas tempoh ini tamat. |
-| `--klip-lebar` | 854 | Resolusi klip (854 = 480p). Guna 1280 untuk 720p, tetapi fail lebih besar dan perlukan lebih RAM. |
-| `--tanpa-video` | – | Hantar gambar sahaja, tanpa video. |
+| `--klip-mod` | auto | `hd`, `label` atau `auto` (HD jika kamera RTSP). |
+| `--tanpa-audio` | – | Klip HD tanpa bunyi. |
+| `--tanpa-video` | – | Hantar gambar sahaja. |
 
-Video ditukar ke format MP4 (H.264) menggunakan ffmpeg dari pakej `imageio-ffmpeg`, yang dipasang bersama
-`pip install -r requirements.txt`. Tiada pemasangan lain diperlukan.
-
-Baileys bukan aplikasi rasmi WhatsApp. Kalau terlalu banyak mesej dihantar, nombor itu boleh disekat.
-Sebab itu guna nombor kedua, dan kekalkan cooldown notifikasi.
+Video diproses menggunakan ffmpeg dari pakej `imageio-ffmpeg`, yang dipasang bersama `pip install -r requirements.txt`.
 
 ### Telegram (pilihan)
 

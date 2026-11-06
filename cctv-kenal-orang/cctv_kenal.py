@@ -763,6 +763,112 @@ def buat_video(bingkai, anotasi, laluan):
     return laluan.read_bytes()
 
 
+class PerakamHD:
+    """Rakam strim asal kamera tanpa ditukar (kualiti penuh, hampir tiada CPU) dalam potongan ~2 saat.
+    Bila orang dikesan, potongan yang meliputi masa itu dicantum menjadi satu MP4."""
+
+    def __init__(self, sumber, simpan_saat=90, audio=True):
+        self.sumber, self.simpan, self.audio = sumber, simpan_saat, audio
+        self.fail = Path(sumber).is_file()
+        self.dir = KLIP_DIR / ".penimbal"
+        shutil.rmtree(self.dir, ignore_errors=True)
+        self.dir.mkdir(parents=True)
+        self.exe = ffmpeg_exe()
+        self.proses, self.tamat = None, False
+        self.kodek = None
+        threading.Thread(target=self._loop, daemon=True).start()
+        atexit.register(self.tutup)
+
+    def _arahan(self):
+        masuk = ["-rtsp_transport", "tcp"] if self.sumber.startswith("rtsp") else []
+        if self.fail:
+            masuk = ["-re"]  # fail video (ujian): main ikut masa sebenar
+        audio = ["-map", "0:a:0?", "-c:a", "aac", "-b:a", "64k"] if self.audio else ["-an"]
+        return [self.exe, "-hide_banner", "-loglevel", "error", *masuk, "-i", self.sumber,
+                "-map", "0:v:0", "-c:v", "copy", *audio,
+                "-f", "segment", "-segment_time", "2", "-segment_format", "mpegts",
+                "-reset_timestamps", "1", "-strftime", "1", str(self.dir / "%Y%m%d-%H%M%S.ts")]
+
+    def _loop(self):
+        while not self.tamat:
+            with open(self.dir / "ffmpeg.log", "ab") as log:
+                self.proses = subprocess.Popen(self._arahan(), stdin=subprocess.DEVNULL,
+                                               stdout=subprocess.DEVNULL, stderr=log)
+                while self.proses.poll() is None and not self.tamat:
+                    self._bersih()
+                    time.sleep(2)
+            if self.fail or self.tamat:
+                break
+            print("[klip-hd] perakam terhenti (kamera terputus?), cuba semula dalam 3 saat ...")
+            time.sleep(3)
+
+    def _bersih(self):
+        had = time.time() - self.simpan
+        for f in self.dir.glob("*.ts"):
+            try:
+                if f.stat().st_mtime < had:
+                    f.unlink()
+            except FileNotFoundError:
+                pass
+
+    def _senarai(self):
+        out = []
+        for f in self.dir.glob("*.ts"):
+            try:
+                out.append((datetime.strptime(f.stem, "%Y%m%d-%H%M%S").timestamp(), f))
+            except ValueError:
+                pass
+        return sorted(out)
+
+    def _berjalan(self):
+        return self.proses is not None and self.proses.poll() is None
+
+    def klip(self, t_dari, t_hingga, laluan, tunggu=40):
+        """Cantum potongan yang meliputi [t_dari, t_hingga] ke `laluan`. -> bait MP4 atau None"""
+        had = time.time() + tunggu
+        while time.time() < had:  # tunggu sehingga potongan yang meliputi t_hingga ditutup
+            seg = self._senarai()
+            if any(t > t_hingga for t, _ in seg) or not self._berjalan():
+                break
+            time.sleep(0.5)
+        seg = self._senarai()
+        if self._berjalan() and seg:
+            mula_akhir = seg[-1][0]   # potongan terakhir masih ditulis
+            seg = seg[:-1]
+        else:
+            mula_akhir = float("inf")
+        pilih = []
+        for i, (t, f) in enumerate(seg):
+            t_seterus = seg[i + 1][0] if i + 1 < len(seg) else mula_akhir
+            if t <= t_hingga and t_seterus > t_dari:
+                pilih.append(f)
+        if not pilih:
+            print("[klip-hd] tiada rakaman untuk tempoh ini")
+            return None
+        senarai = laluan.with_suffix(".txt")
+        senarai.write_text("".join(f"file '{f.as_posix()}'\n" for f in pilih))
+        if self.kodek is None:  # semak kodek kamera sekali
+            r = subprocess.run([self.exe, "-hide_banner", "-i", str(pilih[0])], capture_output=True, text=True)
+            self.kodek = "hevc" if "Video: hevc" in r.stderr else "h264"
+            if self.kodek == "hevc":
+                print("[klip-hd] kamera guna H.265 - klip akan ditukar ke H.264 supaya boleh dimain di WhatsApp")
+        video = ["-c:v", "copy"] if self.kodek == "h264" else \
+            ["-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-pix_fmt", "yuv420p"]
+        r = subprocess.run([self.exe, "-hide_banner", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0",
+                            "-i", str(senarai), *video, "-c:a", "copy", "-bsf:a", "aac_adtstoasc",
+                            "-movflags", "+faststart", str(laluan)], capture_output=True, text=True)
+        senarai.unlink(missing_ok=True)
+        if r.returncode != 0 or not laluan.exists():
+            print(f"[klip-hd] gagal cantum: {r.stderr[:300]}")
+            return None
+        return laluan.read_bytes()
+
+    def tutup(self):
+        self.tamat = True
+        if self._berjalan():
+            self.proses.terminate()
+
+
 class Klip:
     """Satu klip yang sedang dirakam: bingkai sebelum + selepas orang dikesan."""
 
@@ -906,11 +1012,24 @@ def cmd_pantau(a):
     kali_akhir = {}  # kunci -> masa terakhir dilog (untuk cooldown)
     kali_maklum = {}  # kunci -> masa terakhir notifikasi dihantar
     guna_video = not a.tanpa_video and bool(ffmpeg_exe())
+    perakam = None
+    if guna_video:
+        sumber_hd = a.sumber_hd or a.sumber
+        boleh_hd = "://" in sumber_hd or Path(sumber_hd).is_file()
+        if a.klip_mod == "hd" or (a.klip_mod == "auto" and boleh_hd):
+            if not boleh_hd:
+                sys.exit("--klip-mod hd perlukan kamera RTSP (atau --sumber-hd rtsp://...)")
+            perakam = PerakamHD(sumber_hd, simpan_saat=a.klip_sebelum + a.klip_selepas + 90,
+                                audio=not a.tanpa_audio)
     if not a.tanpa_video and not guna_video:
         print("Klip video: tidak aktif - ffmpeg tiada (pip install imageio-ffmpeg)")
+    elif not guna_video:
+        print("Klip video: dimatikan")
     else:
-        print("Klip video:", f"{a.klip_sebelum:g}s sebelum + {a.klip_selepas:g}s selepas" if guna_video else "dimatikan")
-    kam = Kamera(a.sumber, a.klip_sebelum, a.klip_lebar if guna_video else 0)
+        mod = "HD asal kamera" + ("" if not a.tanpa_audio else ", tanpa bunyi") if perakam \
+            else f"berlabel {a.klip_lebar}px"
+        print(f"Klip video: {a.klip_sebelum:g}s sebelum + {a.klip_selepas:g}s selepas ({mod})")
+    kam = Kamera(a.sumber, a.klip_sebelum, a.klip_lebar if guna_video and not perakam else 0)
     anotasi = deque(maxlen=600)  # kotak wajah terkini untuk dilukis dalam klip
     klip_semasa = None
     threads_klip = []
@@ -920,12 +1039,19 @@ def cmd_pantau(a):
         return t + (f"\nNamakan di {pautan}" if asing and pautan else "")
 
     def hantar_klip(k):
-        k.siap.wait(timeout=a.klip_selepas + 60)
-        with kam.kunci_klip:
-            bingkai = list(k.bingkai)
+        if perakam:
+            time.sleep(1.5)  # beri masa orang lain yang sampai serentak digabung
+        else:
+            k.siap.wait(timeout=a.klip_selepas + 60)
         label = "+".join(dict.fromkeys(re.sub(r"[^\w-]+", "_", x) for x in k.label))[:80]
         laluan = KLIP_DIR / f"{datetime.fromtimestamp(k.masa_dinding):%Y%m%d-%H%M%S}_{label}.mp4"
-        video = buat_video(bingkai, list(anotasi), laluan)
+        KLIP_DIR.mkdir(exist_ok=True)
+        if perakam:
+            video = perakam.klip(k.t_mula - a.klip_sebelum, k.t_tamat, laluan, tunggu=a.klip_selepas + 40)
+        else:
+            with kam.kunci_klip:
+                bingkai = list(k.bingkai)
+            video = buat_video(bingkai, list(anotasi), laluan)
         teks = susun_teks(k.baris, k.masa_dinding, k.asing)
         if k.baris:
             notif.hantar_segera(teks, k.img, video)
@@ -988,7 +1114,8 @@ def cmd_pantau(a):
                     continue
                 # gabungkan orang yang dikesan dalam 3 saat yang sama ke dalam satu klip
                 if klip_semasa is None or klip_semasa.siap.is_set() or kam.masa - klip_semasa.t_mula > 3:
-                    klip_semasa = kam.mula_klip(a.klip_selepas)
+                    klip_semasa = Klip([], kam.masa, kam.masa + a.klip_selepas) if perakam \
+                        else kam.mula_klip(a.klip_selepas)
                     klip_semasa.img = img
                     th = threading.Thread(target=hantar_klip, args=(klip_semasa,), daemon=True)
                     th.start()
@@ -1061,7 +1188,12 @@ def main():
     m.add_argument("--tanpa-video", action="store_true", help="hantar gambar sahaja, tanpa klip video")
     m.add_argument("--klip-sebelum", type=float, default=3, help="saat video sebelum orang dikesan. Default 3")
     m.add_argument("--klip-selepas", type=float, default=5, help="saat video selepas orang dikesan. Default 5")
-    m.add_argument("--klip-lebar", type=int, default=854, help="lebar video klip (piksel). Default 854 (480p)")
+    m.add_argument("--klip-mod", choices=["auto", "hd", "label"], default="auto",
+                   help="hd = rakaman asal kamera (kualiti penuh + bunyi, tanpa kotak nama); "
+                        "label = video 480p dengan kotak nama. auto = hd jika kamera RTSP")
+    m.add_argument("--sumber-hd", help="URL RTSP lain untuk rakaman HD (cth stream1), jika --sumber guna stream2")
+    m.add_argument("--tanpa-audio", action="store_true", help="klip HD tanpa bunyi")
+    m.add_argument("--klip-lebar", type=int, default=854, help="lebar video klip mod label (piksel). Default 854")
     m.add_argument("--kekal", action="store_true", help=argparse.SUPPRESS)  # untuk ujian dengan fail video
     m.set_defaults(fn=cmd_pantau)
 
