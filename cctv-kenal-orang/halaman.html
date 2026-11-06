@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="ms">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CCTV Kenal Orang</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --kad: #ffffff; --teks: #1b1f24; --pudar: #667085; --garis: #e4e7ec;
+    --utama: #2563eb; --utama-teks: #ffffff; --ok: #15803d; --bahaya: #dc2626; --chip: #eef2ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e1014; --kad: #171a20; --teks: #e6e8eb; --pudar: #98a2b3; --garis: #2a2f38;
+      --utama: #3b82f6; --utama-teks: #ffffff; --ok: #4ade80; --bahaya: #f87171; --chip: #1e2a44;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--teks);
+         font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  header { position: sticky; top: 0; z-index: 5; background: var(--kad); border-bottom: 1px solid var(--garis); }
+  .bar { max-width: 960px; margin: 0 auto; padding: 12px 16px 0; }
+  h1 { font-size: 17px; margin: 0 0 10px; }
+  nav { display: flex; gap: 4px; overflow-x: auto; }
+  nav button { border: 0; background: none; color: var(--pudar); padding: 8px 12px 10px; font: inherit;
+               border-bottom: 2px solid transparent; cursor: pointer; white-space: nowrap; }
+  nav button.aktif { color: var(--teks); border-color: var(--utama); font-weight: 600; }
+  .bil { display: inline-block; min-width: 20px; padding: 0 6px; margin-left: 4px; border-radius: 10px;
+         background: var(--bahaya); color: #fff; font-size: 12px; line-height: 18px; text-align: center; }
+  main { max-width: 960px; margin: 0 auto; padding: 16px; }
+  .kad { background: var(--kad); border: 1px solid var(--garis); border-radius: 12px; padding: 14px; margin-bottom: 14px; }
+  .atas { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 10px; }
+  .atas b { font-size: 16px; }
+  .pudar { color: var(--pudar); font-size: 13px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 6px; }
+  .gmb { position: relative; aspect-ratio: 1; border-radius: 8px; overflow: hidden; cursor: pointer;
+         background: var(--garis); border: 0; padding: 0; }
+  .gmb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .gmb.keluar img { opacity: .25; }
+  .gmb.keluar::after { content: "✕"; position: absolute; inset: 0; display: grid; place-items: center;
+                       color: var(--bahaya); font-size: 28px; font-weight: 700; }
+  .baris { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  input[type=text] { flex: 1 1 180px; min-width: 0; padding: 10px 12px; font: inherit; color: var(--teks);
+                     background: var(--bg); border: 1px solid var(--garis); border-radius: 8px; }
+  input[type=text]:focus { outline: 2px solid var(--utama); outline-offset: -1px; }
+  button.btn { padding: 10px 14px; font: inherit; border-radius: 8px; cursor: pointer;
+               border: 1px solid var(--garis); background: var(--kad); color: var(--teks); }
+  button.btn.utama { background: var(--utama); border-color: var(--utama); color: var(--utama-teks); font-weight: 600; }
+  button.btn.bahaya { color: var(--bahaya); }
+  button.btn:disabled { opacity: .5; cursor: default; }
+  .chip { border: 0; background: var(--chip); color: var(--utama); padding: 4px 10px; border-radius: 14px;
+          font: inherit; font-size: 13px; cursor: pointer; margin-top: 10px; }
+  .kosong { text-align: center; color: var(--pudar); padding: 40px 16px; }
+  .bantu { color: var(--pudar); font-size: 13px; margin: 0 0 14px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--garis); }
+  th { color: var(--pudar); font-weight: 500; }
+  td.asing { color: var(--bahaya); }
+  #strim { width: 100%; border-radius: 12px; background: #000; min-height: 200px; display: block; }
+  #toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--teks);
+           color: var(--bg); padding: 10px 16px; border-radius: 10px; font-size: 14px; opacity: 0;
+           transition: opacity .2s; pointer-events: none; max-width: calc(100% - 32px); }
+  #toast.tunjuk { opacity: 1; }
+  .fail-input { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <h1>CCTV Kenal Orang</h1>
+    <nav>
+      <button data-tab="baru" class="aktif">Wajah baru<span class="bil" id="bil-baru" hidden></span></button>
+      <button data-tab="orang">Orang berdaftar</button>
+      <button data-tab="log">Log hari ini</button>
+      <button data-tab="langsung">Langsung</button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section id="t-baru">
+    <p class="bantu">Setiap kad ialah seorang yang belum dikenali. Taip namanya dan tekan Simpan.
+      Ketik gambar yang salah orang supaya ia tidak disimpan.</p>
+    <div id="senarai-baru"></div>
+  </section>
+
+  <section id="t-orang" hidden>
+    <div class="kad">
+      <b>Tambah orang dari gambar telefon</b>
+      <div class="baris">
+        <input type="text" id="nama-tambah" placeholder="Nama" list="senarai-nama" autocomplete="off">
+        <button class="btn utama" id="btn-pilih">Pilih gambar</button>
+        <input type="file" id="fail-tambah" class="fail-input" accept="image/*" multiple>
+      </div>
+    </div>
+    <div id="senarai-orang"></div>
+  </section>
+
+  <section id="t-log" hidden>
+    <div class="kad"><table><thead><tr><th>Masa</th><th>Nama</th><th>Skor</th></tr></thead>
+      <tbody id="isi-log"></tbody></table></div>
+  </section>
+
+  <section id="t-langsung" hidden>
+    <img id="strim" alt="Video langsung dari kamera">
+    <p class="bantu" style="margin-top:10px">Video dengan label nama, dikemas kini beberapa kali sesaat.</p>
+  </section>
+</main>
+
+<datalist id="senarai-nama"></datalist>
+<div id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let data = { baru: [], orang: [], log: [] };
+let tab = 'baru';
+const keluar = {};  // id kumpulan -> Set nama fail yang dikeluarkan
+
+function toast(msg) {
+  const t = $('#toast'); t.textContent = msg; t.classList.add('tunjuk');
+  clearTimeout(toast.h); toast.h = setTimeout(() => t.classList.remove('tunjuk'), 2800);
+}
+
+async function post(path, body, jenis = 'application/json') {
+  const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': jenis },
+    body: jenis === 'application/json' ? JSON.stringify(body) : body });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.ralat || ('Ralat ' + r.status));
+  return j;
+}
+
+function sibuk() {
+  const a = document.activeElement;
+  if (a && a.tagName === 'INPUT') return true;
+  return [...document.querySelectorAll('#senarai-baru input[type=text]')].some(i => i.value.trim());
+}
+
+async function muat(paksa = false) {
+  if (!paksa && sibuk()) return;
+  try {
+    data = await (await fetch('/api/data', { cache: 'no-store' })).json();
+    lukis();
+  } catch (e) { toast('Tak dapat sambung ke sistem'); }
+}
+
+function lukis() {
+  const b = $('#bil-baru');
+  b.hidden = !data.baru.length; b.textContent = data.baru.length;
+  $('#senarai-nama').innerHTML = data.orang.map(o => `<option value="${esc(o.nama)}">`).join('');
+  lukisBaru(); lukisOrang(); lukisLog();
+}
+
+function lukisBaru() {
+  const el = $('#senarai-baru');
+  if (!data.baru.length) {
+    el.innerHTML = '<div class="kosong">Tiada wajah baru. Wajah orang yang tidak dikenali akan muncul di sini.</div>';
+    return;
+  }
+  el.innerHTML = data.baru.map(k => {
+    const ks = keluar[k.id] || new Set();
+    return `<div class="kad" data-id="${esc(k.id)}">
+      <div class="atas"><b>Orang #${esc(k.pendek)}</b>
+        <span class="pudar">${k.gambar.length} gambar · dilihat ${esc(k.akhir)}</span></div>
+      <div class="grid">${k.gambar.map(g => `<button class="gmb ${ks.has(g.fail) ? 'keluar' : ''}"
+          data-fail="${esc(g.fail)}" title="Ketik untuk keluarkan"><img loading="lazy" src="${g.url}" alt=""></button>`).join('')}</div>
+      ${k.cadangan ? `<button class="chip" data-cadang="${esc(k.cadangan)}">Mungkin ${esc(k.cadangan)}?</button>` : ''}
+      <div class="baris">
+        <input type="text" placeholder="Nama orang ini" list="senarai-nama" autocomplete="off">
+        <button class="btn utama" data-tindakan="simpan">Simpan</button>
+        <button class="btn bahaya" data-tindakan="buang">Buang</button>
+      </div></div>`;
+  }).join('');
+}
+
+function lukisOrang() {
+  const el = $('#senarai-orang');
+  if (!data.orang.length) {
+    el.innerHTML = '<div class="kosong">Belum ada orang berdaftar.</div>';
+    return;
+  }
+  el.innerHTML = data.orang.map(o => `<div class="kad" data-nama="${esc(o.nama)}">
+      <div class="atas"><b>${esc(o.nama)}</b><span class="pudar">${o.gambar.length} gambar</span></div>
+      <div class="grid">${o.gambar.map(g => `<button class="gmb" data-rel="${esc(g.rel)}" title="Ketik untuk padam">
+          <img loading="lazy" src="${g.url}" alt=""></button>`).join('')}</div>
+      <div class="baris">
+        <button class="btn" data-tindakan="tambah">Tambah gambar</button>
+        <button class="btn bahaya" data-tindakan="padam">Padam orang</button>
+        <input type="file" class="fail-input" accept="image/*" multiple>
+      </div></div>`).join('');
+}
+
+function lukisLog() {
+  $('#isi-log').innerHTML = data.log.length
+    ? data.log.map(r => `<tr><td>${esc(r[0].slice(11))}</td>
+        <td class="${r[1] === 'TIDAK DIKENALI' ? 'asing' : ''}">${esc(r[1])}${r[3] ? ' #' + esc(r[3].slice(-4)) : ''}</td>
+        <td>${esc(r[2])}</td></tr>`).join('')
+    : '<tr><td colspan="3" class="pudar">Belum ada rekod hari ini.</td></tr>';
+}
+
+async function muatNaik(nama, fail) {
+  if (!nama.trim()) { toast('Taip nama dahulu'); return; }
+  let ok = 0;
+  for (const f of fail) {
+    try { await post('/api/muat-naik?nama=' + encodeURIComponent(nama.trim()), f, f.type || 'image/jpeg'); ok++; }
+    catch (e) { toast(`${f.name}: ${e.message}`); await new Promise(r => setTimeout(r, 1500)); }
+  }
+  if (ok) toast(`${ok} gambar ditambah untuk ${nama.trim()}`);
+  muat(true);
+}
+
+// ---- tab
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
+  tab = b.dataset.tab;
+  document.querySelectorAll('nav button').forEach(x => x.classList.toggle('aktif', x === b));
+  document.querySelectorAll('main > section').forEach(s => s.hidden = s.id !== 't-' + tab);
+  $('#strim').src = tab === 'langsung' ? '/strim?' + Date.now() : '';
+});
+
+// ---- wajah baru
+$('#senarai-baru').addEventListener('click', async e => {
+  const kad = e.target.closest('.kad'); if (!kad) return;
+  const id = kad.dataset.id;
+  const gmb = e.target.closest('.gmb');
+  if (gmb) {
+    const s = keluar[id] = keluar[id] || new Set();
+    s.has(gmb.dataset.fail) ? s.delete(gmb.dataset.fail) : s.add(gmb.dataset.fail);
+    gmb.classList.toggle('keluar');
+    return;
+  }
+  const cad = e.target.closest('[data-cadang]');
+  if (cad) { kad.querySelector('input').value = cad.dataset.cadang; kad.querySelector('input').focus(); return; }
+  const t = e.target.closest('[data-tindakan]'); if (!t) return;
+  try {
+    if (t.dataset.tindakan === 'simpan') {
+      const nama = kad.querySelector('input').value.trim();
+      if (!nama) { toast('Taip nama dahulu'); kad.querySelector('input').focus(); return; }
+      t.disabled = true;
+      await post('/api/label', { id, nama, keluarkan: [...(keluar[id] || [])] });
+      kad.querySelector('input').value = '';
+      toast(`Disimpan sebagai ${nama}. Sistem akan kenal orang ini mulai sekarang.`);
+    } else {
+      if (!confirm('Buang semua gambar orang ini?')) return;
+      await post('/api/buang-kumpulan', { id });
+      toast('Dibuang');
+    }
+    delete keluar[id];
+    document.activeElement && document.activeElement.blur();
+    muat(true);
+  } catch (err) { toast(err.message); t.disabled = false; }
+});
+$('#senarai-baru').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && e.target.matches('input')) e.target.closest('.kad').querySelector('[data-tindakan=simpan]').click();
+});
+
+// ---- orang berdaftar
+$('#btn-pilih').onclick = () => {
+  if (!$('#nama-tambah').value.trim()) { toast('Taip nama dahulu'); $('#nama-tambah').focus(); return; }
+  $('#fail-tambah').click();
+};
+$('#fail-tambah').onchange = async e => {
+  await muatNaik($('#nama-tambah').value, [...e.target.files]);
+  e.target.value = ''; $('#nama-tambah').value = '';
+};
+$('#senarai-orang').addEventListener('click', async e => {
+  const kad = e.target.closest('.kad'); if (!kad) return;
+  const nama = kad.dataset.nama;
+  try {
+    const gmb = e.target.closest('.gmb');
+    if (gmb) {
+      if (!confirm('Padam gambar ini?')) return;
+      await post('/api/buang-gambar', { rel: gmb.dataset.rel });
+      toast('Gambar dipadam'); return muat(true);
+    }
+    const t = e.target.closest('[data-tindakan]'); if (!t) return;
+    if (t.dataset.tindakan === 'tambah') return kad.querySelector('input[type=file]').click();
+    if (t.dataset.tindakan === 'padam') {
+      if (!confirm(`Padam ${nama} dan semua gambarnya?`)) return;
+      await post('/api/padam-orang', { nama });
+      toast(`${nama} dipadam`); muat(true);
+    }
+  } catch (err) { toast(err.message); }
+});
+$('#senarai-orang').addEventListener('change', async e => {
+  if (!e.target.matches('input[type=file]')) return;
+  await muatNaik(e.target.closest('.kad').dataset.nama, [...e.target.files]);
+});
+
+muat(true);
+setInterval(() => muat(false), 8000);
+</script>
+</body>
+</html>

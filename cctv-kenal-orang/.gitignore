@@ -1,7 +1,8 @@
 models/
 log/
 tangkapan/
-pangkalan.npz
+wajah_baru/
 orang/*/
+pangkalan.npz
 *.mp4
 __pycache__/
