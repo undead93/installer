@@ -269,7 +269,7 @@ class Stor:
             if kid in self.kumpulan:
                 k = self.kumpulan[kid]
                 k["akhir_lihat"] = sekarang
-                if len(k["fail"]) >= self.maks_gambar or sekarang - k["akhir_simpan"] < self.selang_simpan:
+                if len(k["fail"]) >= self.maks_gambar:
                     return kid, False
             if not self._menghadap(face):
                 self._diagnostik("sisi", "wajah dari sisi (tidak menghadap kamera)")
@@ -283,19 +283,39 @@ class Stor:
                 self._diagnostik("kabur", "wajah terlalu kabur")
                 return kid, False
             baru = kid not in self.kumpulan
+            if not baru:
+                # simpan gambar TERBAIK (paling tajam & besar) dalam setiap tempoh --selang-simpan
+                k = self.kumpulan[kid]
+                q = self._kualiti(img, face)
+                calon = k.get("calon")
+                if calon is None or q > calon[2]:
+                    k["calon"] = (crop, f, q)
+                if sekarang - k["akhir_simpan"] < self.selang_simpan:
+                    return kid, False
+                crop, f, _ = k.pop("calon")
             if baru:
                 kid = f"{datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:4]}"
                 self.kumpulan[kid] = {"fail": [], "ciri": [], "akhir_simpan": 0.0, "akhir_lihat": sekarang}
             d = WAJAH_BARU / kid
             d.mkdir(exist_ok=True)
             p = d / f"{datetime.now():%Y%m%d-%H%M%S-%f}.jpg"
-            cv2.imwrite(str(p), crop, [cv2.IMWRITE_JPEG_QUALITY, 90])
+            cv2.imwrite(str(p), crop, [cv2.IMWRITE_JPEG_QUALITY, 95])
             np.save(fail_ciri(p), f)
             k = self.kumpulan[kid]
             k["fail"].append(p)
             k["ciri"].append(f)
             k["akhir_simpan"] = sekarang
             return kid, baru
+
+    @staticmethod
+    def _kualiti(img, face):
+        """Markah kualiti wajah: ketajaman (dinormalkan ke 112px) x saiz. Tinggi = lebih jelas."""
+        x, y, w, h = (int(v) for v in face[:4])
+        wajah = img[max(0, y):y + h, max(0, x):x + w]
+        if wajah.size == 0:
+            return 0.0
+        g = cv2.resize(cv2.cvtColor(wajah, cv2.COLOR_BGR2GRAY), (112, 112))
+        return float(cv2.Laplacian(g, cv2.CV_64F).var()) * min(w, h)
 
     def _diagnostik(self, jenis, sebab):
         if time.time() - self._diag.get(jenis, 0) > 30:  # maks sekali setiap 30 saat bagi setiap jenis
@@ -396,7 +416,7 @@ class Stor:
         wajah = img[int(max(0, y)):int(y + h), int(max(0, x)):int(x + w)]
         if wajah.size and cv2.Laplacian(cv2.cvtColor(wajah, cv2.COLOR_BGR2GRAY), cv2.CV_64F).var() < 30:
             return None  # terlalu kabur
-        s = 320 / max(crop.shape[:2])
+        s = 640 / max(crop.shape[:2])  # simpan sehingga 640px (tidak dibesarkan jika lebih kecil)
         return cv2.resize(crop, None, fx=s, fy=s) if s < 1 else crop
 
     def bersih(self, hari):
@@ -1360,12 +1380,14 @@ def cmd_pantau(a):
         kam = kk.kam
         sekarang = time.time()
         kotak = []
-        for face in enjin.kesan(img):
-            f = enjin.ciri(img, face)
+        wajah2 = enjin.kesan(img)
+        asal = img.copy() if wajah2 else img  # salinan bersih: kotak/label tidak masuk ke dalam gambar wajah
+        for face in wajah2:
+            f = enjin.ciri(asal, face)
             nama, skor, kid = stor.kenal(f)
             mungkin = None  # orang asing yang hampir padan dengan ahli keluarga (belum pasti)
             if nama is None:
-                kid, kumpulan_baru = stor.rekod_asing(img, face, f, kid, sekarang)
+                kid, kumpulan_baru = stor.rekod_asing(asal, face, f, kid, sekarang)
                 if kumpulan_baru:
                     kk.kad_baru.add(kid)
                 kunci = f"asing:{kid}"
