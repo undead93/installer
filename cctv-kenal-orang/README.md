@@ -41,7 +41,7 @@ Buka alamat itu dari telefon atau komputer yang guna **WiFi yang sama**.
 | **Wajah baru** | Kad untuk setiap orang yang belum dikenali. Taip nama dan tekan Simpan. Ketik gambar yang salah orang supaya ia tidak disimpan. Butang "Mungkin Ali?" muncul jika wajah itu mirip orang yang sudah berdaftar. Kalau orang yang sama ada dalam beberapa kad, tanda **Pilih** pada kad-kad itu dan tekan **Gabungkan**. |
 | **Orang berdaftar** | Senarai orang dan gambar mereka. Anda boleh tambah orang baru dengan memuat naik gambar dari telefon, padam gambar yang salah, atau padam orang. |
 | **Log & video** | Klip video setiap notifikasi, dan senarai siapa dikesan hari ini. |
-| **Langsung** | Video kamera dengan label nama. |
+| **Langsung** | Video kamera dengan tag nama pada wajah, **kad muka** (gambar, nama, masa) di penjuru kanan, dan **zon pengesanan**. Tekan *Lukis zon pengesanan* dan seret jari di atas video: hanya wajah dalam zon diproses (contohnya untuk abaikan jalan raya atau TV). |
 
 Untuk letak kata laluan pada page web:
 

@@ -146,6 +146,48 @@ class Enjin:
 
 
 # ---------------------------------------------------------------- stor data
+FON = cv2.FONT_HERSHEY_SIMPLEX
+
+
+def lukis_tag(img, x, y, w, h, label, warna, skala=0.55):
+    """Kotak wajah dengan tag nama berlatar warna di atasnya."""
+    cv2.rectangle(img, (x, y), (x + w, y + h), warna, 2)
+    (tw, th), _ = cv2.getTextSize(label, FON, skala, 1)
+    y0 = y - th - 8 if y - th - 8 >= 0 else y + h
+    cv2.rectangle(img, (x - 1, y0), (x + tw + 8, y0 + th + 8), warna, -1)
+    cv2.putText(img, label, (x + 4, y0 + th + 3), FON, skala, (255, 255, 255), 1, cv2.LINE_AA)
+
+
+def lukis_kad_muka(img, peristiwa, sekarang, tempoh=60, maks=4):
+    """Kad muka (gambar + nama + masa) bertindan di penjuru kanan atas, seperti NVR."""
+    H, W = img.shape[:2]
+    saiz = max(64, int(W * 0.1))
+    bh = max(16, saiz // 6)
+    x, y = W - saiz - 12, 12
+    for ev in list(peristiwa)[::-1][:maks]:
+        if sekarang - ev["t"] > tempoh or y + saiz + 2 * bh > H:
+            break
+        warna = ev["warna"]
+        cv2.rectangle(img, (x - 2, y - 2), (x + saiz + 1, y + saiz + 2 * bh + 1), warna, -1)
+        img[y + bh:y + bh + saiz, x:x + saiz] = cv2.resize(ev["gambar"], (saiz, saiz))
+        for teks, ty in ((ev["nama"][:14], y + bh - 4), (ev["masa"], y + bh + saiz + bh - 4)):
+            sk = 0.42 * bh / 16
+            cv2.putText(img, teks, (x + 3, ty), FON, sk, (255, 255, 255), 1, cv2.LINE_AA)
+        y += saiz + 2 * bh + 10
+
+
+def potong_segi(img, face, saiz=160):
+    """Potongan segi empat sama sekitar wajah, untuk kad muka."""
+    x, y, w, h = (int(v) for v in face[:4])
+    sisi = int(max(w, h) * 1.5)
+    cx, cy = x + w // 2, y + h // 2
+    H, W = img.shape[:2]
+    x0, y0 = max(0, cx - sisi // 2), max(0, cy - sisi // 2)
+    x1, y1 = min(W, x0 + sisi), min(H, y0 + sisi)
+    c = img[y0:y1, x0:x1]
+    return cv2.resize(c, (saiz, saiz)) if c.size else np.zeros((saiz, saiz, 3), np.uint8)
+
+
 class Stor:
     """Pegang senarai orang berdaftar & kumpulan wajah baru. Dikongsi antara kamera dan page web."""
 
@@ -170,6 +212,8 @@ class Stor:
             self.tetapan = {}
         self.tetapan.setdefault("senyap", [])  # orang berdaftar yang TIDAK hantar notifikasi
         self.tetapan.setdefault("mesej", {})   # mesej notifikasi khas, cth {"Isteri": "🏠 Isteri dah balik"}
+        self.tetapan.setdefault("zon", {})     # nama kamera -> [x0, y0, x1, y1] (0..1): kawasan wajah diproses
+        self.peristiwa = {}                    # nama kamera -> deque kad muka terkini untuk paparan langsung
         ORANG.mkdir(exist_ok=True)
         WAJAH_BARU.mkdir(exist_ok=True)
         self.muat_orang()
@@ -638,6 +682,7 @@ class Stor:
                              "kamera": kam.replace("_", " ")})
         return {"baru": baru, "orang": orang, "log": log, "klip": klip,
                 "kamera": list(self.kamera) or list(self.bingkai),
+                "zon": dict(self.tetapan["zon"]),
                 "saluran": self.notif.nama if self.notif else [],
                 "whatsapp": self.notif.whatsapp.status()
                 if self.notif and self.notif.whatsapp.aktif else None}
@@ -647,6 +692,31 @@ class Stor:
         self.bil_bingkai[kamera] = self.bil_bingkai.get(kamera, 0) + 1
         if kotak is not None:
             self.kotak[kamera] = (time.time(), kotak)
+
+    def tambah_peristiwa(self, kamera, nama, warna, gambar):
+        self.peristiwa.setdefault(kamera, deque(maxlen=6)).append(
+            {"t": time.time(), "nama": nama, "warna": warna, "gambar": gambar,
+             "masa": datetime.now().strftime("%H:%M:%S")})
+
+    def zon_untuk(self, kamera):
+        z = self.tetapan["zon"].get(kamera)
+        return tuple(z) if z else None
+
+    def set_zon(self, kamera, zon):
+        if not isinstance(kamera, str) or kamera not in self.kamera:
+            raise ValueError("Kamera belum sedia atau tidak dikenali. Muat semula page dan cuba lagi.")
+        with self.kunci:
+            if zon:
+                try:
+                    x0, y0, x1, y1 = (min(1.0, max(0.0, float(v))) for v in zon)
+                except (TypeError, ValueError):
+                    raise ValueError("Zon tidak sah.")
+                if x1 - x0 < 0.05 or y1 - y0 < 0.05:
+                    raise ValueError("Zon terlalu kecil.")
+                self.tetapan["zon"][kamera] = [round(v, 4) for v in (x0, y0, x1, y1)]
+            else:
+                self.tetapan["zon"].pop(kamera, None)
+            self._simpan_tetapan()
 
     def bingkai_terkini(self):
         """Bingkai terbaru dari kamera pertama (untuk notifikasi ujian), atau None."""
@@ -669,12 +739,16 @@ class Stor:
         s = 960 / img.shape[1]
         img = cv2.resize(img, None, fx=s, fy=s) if s < 1 else img.copy()
         s = min(s, 1.0)
+        H, W = img.shape[:2]
+        zon = self.zon_untuk(nama)
+        if zon:  # zon pengesanan (hijau)
+            cv2.rectangle(img, (int(zon[0] * W), int(zon[1] * H)), (int(zon[2] * W), int(zon[3] * H)), (0, 200, 0), 2)
         t, kotak = self.kotak.get(nama, (0.0, []))
         if time.time() - t < 0.8:
             for x, y, w, h, label, warna in kotak:
-                x, y, w, h = int(x * s), int(y * s), int(w * s), int(h * s)
-                cv2.rectangle(img, (x, y), (x + w, y + h), warna, 2)
-                cv2.putText(img, label, (x, max(14, y - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, warna, 2)
+                lukis_tag(img, int(x * s), int(y * s), int(w * s), int(h * s), label, warna, 0.5)
+        lukis_kad_muka(img, self.peristiwa.get(nama, ()), time.time())
+        kunci = (kunci, len(self.peristiwa.get(nama, ())), self.peristiwa.get(nama, [{}])[-1].get("t") if self.peristiwa.get(nama) else 0)
         return kunci, cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 75])[1].tobytes()
 
 
@@ -817,6 +891,8 @@ def mula_web(stor, port, kata_laluan):
                     stor.padam_orang(d.get("nama"))
                 elif url.path == "/api/maklum":
                     stor.set_maklum(d.get("nama"), bool(d.get("hidup")))
+                elif url.path == "/api/zon":
+                    stor.set_zon(d.get("kamera"), d.get("zon"))
                 elif url.path == "/api/mesej":
                     stor.set_mesej(d.get("nama"), d.get("mesej", ""))
                 elif url.path == "/api/uji-maklum":
@@ -1381,6 +1457,11 @@ def cmd_pantau(a):
         sekarang = time.time()
         kotak = []
         wajah2 = enjin.kesan(img)
+        zon = stor.zon_untuk(kk.nama)
+        if zon:  # hanya wajah yang berada dalam zon pengesanan
+            H, W = img.shape[:2]
+            wajah2 = [fc for fc in wajah2
+                      if zon[0] <= (fc[0] + fc[2] / 2) / W <= zon[2] and zon[1] <= (fc[1] + fc[3] / 2) / H <= zon[3]]
         asal = img.copy() if wajah2 else img  # salinan bersih: kotak/label tidak masuk ke dalam gambar wajah
         for face in wajah2:
             f = enjin.ciri(asal, face)
@@ -1404,14 +1485,14 @@ def cmd_pantau(a):
                 label_log = label
                 warna = (0, 200, 0) if pasti else (0, 165, 255)  # oren = dikenali tetapi belum pasti
             x, y, w, h = face[:4].astype(int)
-            cv2.rectangle(img, (x, y), (x + w, y + h), warna, 2)
-            cv2.putText(img, f"{label} {skor:.2f}", (x, max(0, y - 8)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, warna, 2)
+            lukis_tag(img, x, y, w, h, f"{label} {skor:.2f}", warna, 0.6)
             kotak.append((x, y, w, h, label, warna))
 
             # --- log (sekali setiap --cooldown saat bagi setiap orang, setiap kamera)
             if sekarang - kali_akhir.get(f"{kunci}@{kk.nama}", 0) >= a.cooldown:
                 kali_akhir[f"{kunci}@{kk.nama}"] = sekarang
+                stor.tambah_peristiwa(kk.nama, label if nama or mungkin else "TIDAK DIKENALI", warna,
+                                      potong_segi(asal, face))
                 masa = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 log.writerow([masa, nama or "TIDAK DIKENALI", f"{skor:.3f}", kid or "", kk.nama])
                 log_f.flush()

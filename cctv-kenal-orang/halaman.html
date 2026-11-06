@@ -67,6 +67,12 @@
   th { color: var(--pudar); font-weight: 500; }
   td.asing { color: var(--bahaya); }
   #strim { width: 100%; border-radius: 12px; background: #000; min-height: 200px; display: block; }
+  .langsung-wrap { position: relative; }
+  #zon-lapis { position: absolute; inset: 0; cursor: crosshair; touch-action: none; border-radius: 12px;
+               background: rgba(0,0,0,.25); }
+  #zon-lapis[hidden], #zon-lukis[hidden] { display: none; }
+  #zon-lukis { position: absolute; border: 2px dashed #22c55e; background: rgba(34,197,94,.18); pointer-events: none; }
+  #zon-status { font-size: 13px; color: var(--pudar); margin-top: 8px; }
   #toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--teks);
            color: var(--bg); padding: 10px 16px; border-radius: 10px; font-size: 14px; opacity: 0;
            transition: opacity .2s; pointer-events: none; max-width: calc(100% - 32px); }
@@ -156,8 +162,23 @@
 
   <section id="t-langsung" hidden>
     <div class="pilih-kamera" id="pilih-kamera" hidden></div>
-    <img id="strim" alt="Video langsung dari kamera">
-    <p class="bantu" style="margin-top:10px">Video dengan label nama, dikemas kini beberapa kali sesaat.</p>
+    <div class="langsung-wrap">
+      <img id="strim" alt="Video langsung dari kamera">
+      <div id="zon-lapis" hidden></div>
+      <div id="zon-lukis" hidden></div>
+    </div>
+    <div id="zon-status"></div>
+    <div class="baris" id="zon-alat">
+      <button class="btn" id="btn-zon">✏️ Lukis zon pengesanan</button>
+      <button class="btn" id="btn-zon-buang">Buang zon</button>
+    </div>
+    <div class="baris" id="zon-simpan-bar" hidden>
+      <span class="pudar" style="flex:1 1 100%">Seret jari di atas video untuk lukis kawasan. Hanya wajah dalam kawasan ini akan diproses.</span>
+      <button class="btn" id="btn-zon-batal">Batal</button>
+      <button class="btn utama" id="btn-zon-simpan">Simpan zon</button>
+    </div>
+    <p class="bantu" style="margin-top:10px">Kotak berlabel nama pada wajah, kad muka (gambar, nama, masa) di penjuru kanan,
+      dan zon pengesanan hijau. Dikemas kini beberapa kali sesaat.</p>
   </section>
 </main>
 
@@ -213,7 +234,7 @@ function kemasBarGabung() {
 }
 
 function sibuk() {
-  if (dipilih.size || !$('#lapisan').hidden) return true;
+  if (dipilih.size || !$('#lapisan').hidden || !$('#zon-lapis').hidden) return true;
   const a = document.activeElement;
   if (a && a.tagName === 'INPUT') return true;
   if ([...document.querySelectorAll('input.mesej')].some(i => i.value !== i.defaultValue)) return true;
@@ -237,7 +258,7 @@ function lukis() {
     : 'Belum disetkan. Lihat README untuk sambung WhatsApp.';
   $('#btn-uji').disabled = !(data.saluran && data.saluran.length);
   lukisWA(data.whatsapp);
-  lukisBaru(); lukisOrang(); lukisLog();
+  lukisBaru(); lukisOrang(); lukisLog(); lukisZonStatus();
 }
 
 let qrTerakhir = null;
@@ -352,10 +373,58 @@ function mulaStrim() {
   $('#strim').src = tab === 'langsung'
     ? '/strim?' + (kameraLangsung ? 'k=' + encodeURIComponent(kameraLangsung) + '&' : '') + 't=' + Date.now() : '';
 }
+// ---- zon pengesanan
+function kameraZon() { return kameraLangsung || (data.kamera || [])[0] || null; }
+function lukisZonStatus() {
+  $('#btn-zon').disabled = !kameraZon();
+  if (!kameraZon()) { $('#zon-status').textContent = 'Menunggu kamera...'; $('#btn-zon-buang').hidden = true; return; }
+  const z = (data.zon || {})[kameraZon()];
+  $('#zon-status').textContent = z
+    ? `Zon pengesanan aktif untuk ${kameraZon()}: hanya wajah dalam kotak hijau diproses.`
+    : `Tiada zon untuk ${kameraZon()}: seluruh gambar kamera diproses.`;
+  $('#btn-zon-buang').hidden = !z;
+}
+let zonMula = null, zonKotak = null;
+function relatif(e) {
+  const r = $('#strim').getBoundingClientRect();
+  return { x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
+           y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) };
+}
+function paparKotakZon() {
+  const el = $('#zon-lukis'); if (!zonKotak) { el.hidden = true; return; }
+  const r = $('#strim').getBoundingClientRect(), w = $('.langsung-wrap').getBoundingClientRect();
+  Object.assign(el.style, { left: (r.left - w.left + zonKotak[0] * r.width) + 'px', top: (r.top - w.top + zonKotak[1] * r.height) + 'px',
+    width: ((zonKotak[2] - zonKotak[0]) * r.width) + 'px', height: ((zonKotak[3] - zonKotak[1]) * r.height) + 'px' });
+  el.hidden = false;
+}
+function modZon(hidup) {
+  $('#zon-lapis').hidden = !hidup; $('#zon-simpan-bar').hidden = !hidup; $('#zon-alat').hidden = hidup;
+  if (!hidup) { zonKotak = null; zonMula = null; paparKotakZon(); }
+}
+$('#btn-zon').onclick = () => { modZon(true); toast('Seret jari di atas video untuk lukis zon'); };
+$('#btn-zon-batal').onclick = () => modZon(false);
+$('#zon-lapis').addEventListener('pointerdown', e => { e.preventDefault(); zonMula = relatif(e); $('#zon-lapis').setPointerCapture(e.pointerId); });
+$('#zon-lapis').addEventListener('pointermove', e => {
+  if (!zonMula) return; const p = relatif(e);
+  zonKotak = [Math.min(zonMula.x, p.x), Math.min(zonMula.y, p.y), Math.max(zonMula.x, p.x), Math.max(zonMula.y, p.y)];
+  paparKotakZon();
+});
+$('#zon-lapis').addEventListener('pointerup', () => { zonMula = null; });
+$('#btn-zon-simpan').onclick = async () => {
+  if (!zonKotak) { toast('Lukis kotak dahulu'); return; }
+  try { await post('/api/zon', { kamera: kameraZon(), zon: zonKotak }); toast('Zon pengesanan disimpan'); modZon(false); muat(true); }
+  catch (err) { toast(err.message); }
+};
+$('#btn-zon-buang').onclick = async () => {
+  if (!confirm(`Buang zon untuk ${kameraZon()}? Seluruh gambar akan diproses semula.`)) return;
+  try { await post('/api/zon', { kamera: kameraZon(), zon: null }); toast('Zon dibuang'); muat(true); }
+  catch (err) { toast(err.message); }
+};
+
 $('#pilih-kamera').addEventListener('click', e => {
   const b = e.target.closest('[data-kamera]'); if (!b) return;
   kameraLangsung = b.dataset.kamera;
-  lukisPilihKamera(); mulaStrim();
+  lukisPilihKamera(); mulaStrim(); lukisZonStatus(); modZon(false);
 });
 
 async function muatNaik(nama, fail) {
