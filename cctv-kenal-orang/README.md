@@ -229,6 +229,12 @@ Simpan semua baris `export` dalam fail `tetapan.sh`, kemudian jalankan:
 
 ## Tips ketepatan
 
+**Semua orang dikenali sebagai nama yang sama?** Biasanya ini berlaku kerana ada gambar orang lain, atau gambar yang
+kabur, di bawah nama itu. Dalam tab **Orang berdaftar**, setiap gambar menunjukkan berapa kali ia dipadankan
+(contohnya `12×`). Gambar yang padan dengan kebanyakan orang dengan skor rendah ditanda **⚠️**. Ketik gambar itu
+untuk **Pindah** ke orang yang betul, atau **Padam**. Seseorang hanya dikenali bila purata 2 gambarnya yang paling
+serupa melepasi `--ambang`, jadi satu gambar yang salah tidak lagi cukup untuk menyebabkan orang lain tersalah dikenali.
+
 **Wajah jauh tidak dikesan?** Sistem mengecilkan gambar kamera ke lebar 1280 piksel sebelum mencari wajah (`--lebar-kesan`).
 Pada kamera 2K, ini mengesan wajah dari kira-kira 60 piksel. Untuk orang yang lebih jauh, guna `--lebar-kesan 1920`
 dan `--saiz-min 40`. Ini perlukan lebih CPU, dan wajah yang kecil kurang tepat untuk dikenal.

@@ -178,7 +178,7 @@ class Stor:
 
     # ---- orang berdaftar
     def muat_orang(self, verbose=False):
-        nama, ciri = [], []
+        nama, ciri, fail = [], [], []
         for d in sorted(p for p in ORANG.iterdir() if p.is_dir()):
             n = 0
             for img_path in senarai_gambar(d):
@@ -194,19 +194,36 @@ class Stor:
                     np.save(npy, f)
                 nama.append(d.name)
                 ciri.append(f)
+                fail.append(img_path)
                 n += 1
             if verbose:
                 print(f"{d.name}: {n} gambar")
         with self.kunci:
             self.nama = np.array(nama)
             self.ciri = np.stack(ciri) if ciri else np.zeros((0, 128), np.float32)
+            self.fail_orang = fail
+            self.indeks_nama = {n: np.flatnonzero(self.nama == n) for n in set(nama)}
+            if not hasattr(self, "kiraan_padan"):
+                self.kiraan_padan = {}  # laluan gambar -> [bilangan padanan, jumlah skor]
 
-    def padan_orang(self, f):
+    def padan_orang(self, f, catat=False):
+        """-> (nama, skor). Skor seseorang = purata 2 gambarnya yang paling serupa (atau 1 jika dia ada
+        satu gambar sahaja), supaya satu gambar kabur/salah tidak boleh 'menarik' semua orang."""
         if len(self.ciri) == 0:
             return None, 0.0
         s = self.ciri @ f
-        i = int(np.argmax(s))
-        return str(self.nama[i]), float(s[i])
+        terbaik, nama_t, i_t = -1.0, None, -1
+        for n, idx in self.indeks_nama.items():
+            sk = s[idx]
+            urut = np.argsort(sk)[::-1]
+            skor = float(np.mean(sk[urut[:2]]))
+            if skor > terbaik:
+                terbaik, nama_t, i_t = skor, n, int(idx[urut[0]])
+        if catat and terbaik >= self.ambang:
+            k = self.kiraan_padan.setdefault(str(self.fail_orang[i_t]), [0, 0.0])
+            k[0] += 1
+            k[1] += float(s[i_t])
+        return nama_t, terbaik
 
     # ---- kumpulan wajah baru
     def muat_kumpulan(self):
@@ -227,7 +244,7 @@ class Stor:
     def kenal(self, f):
         """-> (nama | None, skor, id_kumpulan | None)"""
         with self.kunci:
-            nama, skor = self.padan_orang(f)
+            nama, skor = self.padan_orang(f, catat=True)
             if nama is not None and skor >= self.ambang:
                 return nama, skor, None
             cocok = []
@@ -447,6 +464,25 @@ class Stor:
                 if k is not None and not k["fail"]:
                     self.buang_kumpulan(p.parent.name)
 
+    def pindah_gambar(self, rel, nama):
+        """Pindah satu gambar orang berdaftar ke orang lain (dicipta jika belum wujud)."""
+        p, nama = self._laluan_selamat(rel), self.semak_nama(nama)
+        if p.parent.parent != ORANG or not p.exists():
+            raise ValueError("Gambar tidak dijumpai.")
+        with self.kunci:
+            dest_dir = ORANG / nama
+            dest_dir.mkdir(exist_ok=True)
+            dest = dest_dir / p.name
+            if dest.exists():
+                dest = dest_dir / f"{p.parent.name}_{p.name}"
+            shutil.move(str(p), dest)
+            if fail_ciri(p).exists():
+                shutil.move(str(fail_ciri(p)), fail_ciri(dest))
+            if not senarai_gambar(p.parent):
+                shutil.rmtree(p.parent, ignore_errors=True)
+            self.kiraan_padan.pop(str(p), None)
+            self.muat_orang()
+
     def tukar_nama(self, lama, baru):
         """Tukar nama orang berdaftar. Jika nama baru sudah wujud, gambar digabung ke dalamnya."""
         lama, baru = self.semak_nama(lama), self.semak_nama(baru)
@@ -553,7 +589,15 @@ class Stor:
                 })
             orang = []
             for d in sorted(p for p in ORANG.iterdir() if p.is_dir()):
-                gambar = [{"url": url(p), "rel": p.relative_to(ROOT).as_posix()} for p in senarai_gambar(d)]
+                gambar = []
+                for p in senarai_gambar(d):
+                    k = self.kiraan_padan.get(str(p), [0, 0.0])
+                    gambar.append({"url": url(p), "rel": p.relative_to(ROOT).as_posix(), "padan": k[0],
+                                   "skor": round(k[1] / k[0], 2) if k[0] else None})
+                jumlah = sum(g["padan"] for g in gambar)
+                for g in gambar:  # gambar yang padan dengan kebanyakan pengesanan tetapi skornya rendah
+                    g["curiga"] = bool(g["padan"] >= 10 and len(gambar) > 2 and g["padan"] > 0.5 * jumlah
+                                       and g["skor"] is not None and g["skor"] < self.ambang + 0.1)
                 orang.append({"nama": d.name, "gambar": gambar, "maklum": self.maklum_hidup(d.name),
                               "mesej": self.tetapan["mesej"].get(d.name, "")})
         log = []
@@ -744,6 +788,8 @@ def mula_web(stor, port, kata_laluan):
                     stor.buang_kumpulan(d.get("id"))
                 elif url.path == "/api/buang-gambar":
                     stor.buang_gambar(d.get("rel", ""))
+                elif url.path == "/api/pindah-gambar":
+                    stor.pindah_gambar(d.get("rel", ""), d.get("nama"))
                 elif url.path == "/api/tukar-nama":
                     stor.tukar_nama(d.get("nama"), d.get("baru"))
                 elif url.path == "/api/padam-orang":

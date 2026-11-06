@@ -38,6 +38,15 @@
          background: var(--garis); border: 0; padding: 0; }
   .gmb img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .gmb.keluar img { opacity: .25; }
+  .lencana { position: absolute; left: 3px; bottom: 3px; background: rgba(0,0,0,.65); color: #fff;
+             font-size: 10px; line-height: 15px; padding: 0 5px; border-radius: 8px; pointer-events: none; }
+  .gmb.curiga { outline: 3px solid #f59e0b; outline-offset: -3px; }
+  .gmb.curiga .lencana { background: #b45309; }
+  #lapisan { position: fixed; inset: 0; z-index: 9; background: rgba(0,0,0,.45); display: flex; align-items: flex-end; justify-content: center; }
+  #lapisan[hidden] { display: none; }
+  #menu-gambar { background: var(--kad); width: 100%; max-width: 520px; border-radius: 16px 16px 0 0; padding: 16px; }
+  #menu-gambar img { width: 96px; height: 96px; object-fit: cover; border-radius: 10px; float: left; margin-right: 12px; }
+  #menu-gambar .baris { clear: both; padding-top: 12px; }
   .gmb.keluar::after { content: "✕"; position: absolute; inset: 0; display: grid; place-items: center;
                        color: var(--bahaya); font-size: 28px; font-weight: 700; }
   .baris { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
@@ -153,6 +162,20 @@
 </main>
 
 <datalist id="senarai-nama"></datalist>
+<div id="lapisan" hidden>
+  <div id="menu-gambar" role="dialog" aria-label="Tindakan gambar">
+    <img id="mg-img" alt="">
+    <b id="mg-tajuk"></b><div class="pudar" id="mg-info"></div>
+    <div class="baris">
+      <input type="text" id="mg-nama" placeholder="Pindah ke nama..." list="senarai-nama" autocomplete="off">
+      <button class="btn utama" id="mg-pindah">Pindah</button>
+    </div>
+    <div class="baris">
+      <button class="btn bahaya" id="mg-padam">Padam gambar</button>
+      <button class="btn" id="mg-batal">Batal</button>
+    </div>
+  </div>
+</div>
 <div id="bar-gabung" hidden>
   <span id="bil-pilih"></span>
   <button class="btn" id="btn-batal-pilih">Batal</button>
@@ -190,7 +213,7 @@ function kemasBarGabung() {
 }
 
 function sibuk() {
-  if (dipilih.size) return true;
+  if (dipilih.size || !$('#lapisan').hidden) return true;
   const a = document.activeElement;
   if (a && a.tagName === 'INPUT') return true;
   if ([...document.querySelectorAll('input.mesej')].some(i => i.value !== i.defaultValue)) return true;
@@ -269,8 +292,12 @@ function lukisOrang() {
   }
   el.innerHTML = data.orang.map(o => `<div class="kad" data-nama="${esc(o.nama)}">
       <div class="atas"><b>${esc(o.nama)}</b><span class="pudar">${o.gambar.length} gambar</span></div>
-      <div class="grid">${o.gambar.map(g => `<button class="gmb" data-rel="${esc(g.rel)}" title="Ketik untuk padam">
-          <img loading="lazy" src="${g.url}" alt=""></button>`).join('')}</div>
+      <div class="grid">${o.gambar.map(g => `<button class="gmb ${g.curiga ? 'curiga' : ''}" data-rel="${esc(g.rel)}"
+          data-url="${g.url}" data-padan="${g.padan}" data-skor="${g.skor ?? ''}" data-curiga="${g.curiga ? 1 : ''}"
+          title="Ketik untuk pindah atau padam"><img loading="lazy" src="${g.url}" alt="">
+          ${g.padan ? `<span class="lencana">${g.curiga ? '⚠️ ' : ''}${g.padan}×</span>` : ''}</button>`).join('')}</div>
+      ${o.gambar.some(g => g.curiga) ? `<p class="pudar" style="margin:8px 0 0">⚠️ Gambar bertanda padan dengan kebanyakan orang
+        yang lalu, dengan skor rendah. Mungkin gambar itu kabur atau bukan ${esc(o.nama)}. Ketik untuk pindah atau padam.</p>` : ''}
       <label class="suis"><input type="checkbox" class="maklum" ${o.maklum ? 'checked' : ''}>
         <span>Hantar notifikasi bila ${esc(o.nama)} dikesan</span></label>
       <div class="baris">
@@ -413,16 +440,42 @@ $('#fail-tambah').onchange = async e => {
   await muatNaik($('#nama-tambah').value, [...e.target.files]);
   e.target.value = ''; $('#nama-tambah').value = '';
 };
+// ---- menu gambar orang berdaftar: pindah atau padam
+let menuGambar = null;
+function bukaMenuGambar(gmb, nama) {
+  menuGambar = { rel: gmb.dataset.rel, nama };
+  $('#mg-img').src = gmb.dataset.url;
+  $('#mg-tajuk').textContent = `Gambar ${nama}`;
+  const n = +gmb.dataset.padan;
+  $('#mg-info').textContent = n
+    ? `Dipadankan ${n} kali sejak sistem dimulakan (skor purata ${gmb.dataset.skor}).` +
+      (gmb.dataset.curiga ? ' ⚠️ Padan dengan ramai orang – mungkin kabur atau bukan orang ini.' : '')
+    : 'Belum dipadankan sejak sistem dimulakan.';
+  $('#mg-nama').value = '';
+  $('#lapisan').hidden = false;
+}
+function tutupMenuGambar() { $('#lapisan').hidden = true; menuGambar = null; }
+$('#mg-batal').onclick = tutupMenuGambar;
+$('#lapisan').addEventListener('click', e => { if (e.target.id === 'lapisan') tutupMenuGambar(); });
+$('#mg-pindah').onclick = async () => {
+  const ke = $('#mg-nama').value.trim();
+  if (!ke) { toast('Taip nama orang yang betul'); $('#mg-nama').focus(); return; }
+  try { await post('/api/pindah-gambar', { rel: menuGambar.rel, nama: ke });
+        toast(`Gambar dipindah ke ${ke}`); tutupMenuGambar(); muat(true); }
+  catch (err) { toast(err.message); }
+};
+$('#mg-padam').onclick = async () => {
+  try { await post('/api/buang-gambar', { rel: menuGambar.rel });
+        toast('Gambar dipadam'); tutupMenuGambar(); muat(true); }
+  catch (err) { toast(err.message); }
+};
+
 $('#senarai-orang').addEventListener('click', async e => {
   const kad = e.target.closest('.kad'); if (!kad) return;
   const nama = kad.dataset.nama;
   try {
     const gmb = e.target.closest('.gmb');
-    if (gmb) {
-      if (!confirm('Padam gambar ini?')) return;
-      await post('/api/buang-gambar', { rel: gmb.dataset.rel });
-      toast('Gambar dipadam'); return muat(true);
-    }
+    if (gmb) return bukaMenuGambar(gmb, nama);
     const t = e.target.closest('[data-tindakan]'); if (!t) return;
     if (t.dataset.tindakan === 'tambah') return kad.querySelector('input[type=file]').click();
     if (t.dataset.tindakan === 'mesej') {
