@@ -93,6 +93,20 @@ Untuk simpan tetapan, buat fail `tetapan.ps1` yang mengandungi baris-baris `$env
 - Supaya PC tidak tidur, pergi ke Settings, kemudian System, kemudian Power, dan tetapkan *Sleep* kepada **Never** semasa sistem berjalan.
 - Untuk pindah ke Mac nanti, salin folder `orang/`, `whatsapp/auth/` dan fail `tetapan.json`. Wajah yang sudah dinamakan, sesi WhatsApp dan mesej khas akan ikut sekali, jadi tak perlu daftar atau imbas QR semula.
 
+## Daftar wajah dengan kamera (webcam / telefon)
+
+Dalam tab **Orang berdaftar**, guna kad **📷 Daftar wajah dengan kamera**. Taip nama dan tekan **Buka kamera**, kemudian
+tekan **Mula ambil gambar**. Ikut arahan di skrin (pandang depan, toleh kiri dan kanan, dongak, tunduk). Sistem akan
+mengambil 8 gambar dan mendaftarkannya terus.
+
+Pelayar web hanya membenarkan kamera pada page **https://** atau **localhost**:
+- **Di PC yang menjalankan sistem:** buka `http://localhost:8000`, dan webcam boleh terus digunakan.
+- **Di telefon:** buka alamat **HTTPS** yang dipaparkan semasa sistem bermula, contohnya `https://192.168.0.50:8443`.
+  Pelayar akan memberi amaran kerana sijil keselamatan dijana sendiri oleh sistem ini. Tekan **Advanced → Proceed**
+  (Chrome) atau **Show Details → visit this website** (Safari). Langkah ini hanya perlu sekali.
+
+Sijil disimpan dalam `sijil/`. Guna `--port-https 0` untuk tutup page HTTPS.
+
 ## Kamera Tapo
 
 1. Dalam app Tapo, buka kamera, tekan ⚙️ Settings, pilih **Advanced Settings**, kemudian **Camera Account**. Buat nama pengguna dan kata laluan. Ini bukan akaun TP-Link anda. Elakkan simbol `@ : / #`.

@@ -17,7 +17,9 @@ import json
 import os
 import re
 import shutil
+import ipaddress
 import socket
+import ssl
 import subprocess
 import sys
 import threading
@@ -863,6 +865,7 @@ class Stor:
         return {"baru": baru, "orang": orang, "log": log, "klip": klip,
                 "kamera": list(self.kamera) or list(self.bingkai),
                 "zon": dict(self.tetapan["zon"]),
+                "https": getattr(self, "port_https", None),
                 "saluran": self.notif.nama if self.notif else [],
                 "whatsapp": self.notif.whatsapp.status()
                 if self.notif and self.notif.whatsapp.aktif else None}
@@ -933,7 +936,41 @@ class Stor:
 
 
 # ---------------------------------------------------------------- page web
-def mula_web(stor, port, kata_laluan):
+def sijil_sendiri():
+    """Sijil HTTPS yang ditandatangani sendiri (supaya kamera telefon boleh digunakan dalam page web).
+    -> (crt, key) atau None jika pakej cryptography tiada."""
+    d = ROOT / "sijil"
+    crt, key = d / "cctv.crt", d / "cctv.key"
+    if crt.exists() and key.exists():
+        return crt, key
+    try:
+        from cryptography import x509
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
+        from cryptography.x509.oid import NameOID
+    except ImportError:
+        return None
+    from datetime import timedelta, timezone
+    d.mkdir(exist_ok=True)
+    k = ec.generate_private_key(ec.SECP256R1())
+    nama = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "CCTV Kenal Orang")])
+    alt = [x509.DNSName("localhost"), x509.IPAddress(ipaddress.ip_address("127.0.0.1"))]
+    try:
+        alt.append(x509.IPAddress(ipaddress.ip_address(ip_lan())))
+    except ValueError:
+        pass
+    kini = datetime.now(timezone.utc)
+    c = (x509.CertificateBuilder().subject_name(nama).issuer_name(nama).public_key(k.public_key())
+         .serial_number(x509.random_serial_number()).not_valid_before(kini - timedelta(days=1))
+         .not_valid_after(kini + timedelta(days=3650))
+         .add_extension(x509.SubjectAlternativeName(alt), critical=False).sign(k, hashes.SHA256()))
+    key.write_bytes(k.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                                    serialization.NoEncryption()))
+    crt.write_bytes(c.public_bytes(serialization.Encoding.PEM))
+    return crt, key
+
+
+def mula_web(stor, port, kata_laluan, port_https=0):
     halaman = HALAMAN.read_bytes()
     auth_sah = kata_laluan
 
@@ -1097,6 +1134,32 @@ def mula_web(stor, port, kata_laluan):
     srv = Pelayan(("0.0.0.0", port), H)
     srv.daemon_threads = True
     threading.Thread(target=srv.serve_forever, daemon=True).start()
+
+    stor.port_https = None
+    if port_https:
+        sijil = sijil_sendiri()
+        if sijil is None:
+            print("Page web HTTPS: tidak aktif (pip install cryptography) - kamera telefon tidak boleh digunakan")
+        else:
+            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            ctx.load_cert_chain(*sijil)
+
+            class PelayanHTTPS(Pelayan):
+                def finish_request(self, request, client_address):
+                    try:  # jabat tangan TLS dalam thread permintaan (bukan thread utama pelayan)
+                        request = ctx.wrap_socket(request, server_side=True)
+                    except (ssl.SSLError, OSError):
+                        return
+                    super().finish_request(request, client_address)
+
+            try:
+                srv2 = PelayanHTTPS(("0.0.0.0", port_https), H)
+                srv2.daemon_threads = True
+                threading.Thread(target=srv2.serve_forever, daemon=True).start()
+                stor.port_https = port_https
+                print(f"Page web HTTPS (untuk daftar wajah guna kamera telefon): https://{ip_lan()}:{port_https}")
+            except OSError as e:
+                print(f"Page web HTTPS: tidak dapat dibuka ({e})")
     return f"http://{ip_lan()}:{port}"
 
 
@@ -1574,7 +1637,7 @@ def cmd_pantau(a):
 
     pautan = ""
     if a.port:
-        pautan = mula_web(stor, a.port, a.kata_laluan)
+        pautan = mula_web(stor, a.port, a.kata_laluan, a.port_https)
         print(f"Page web: {pautan}  (buka dari telefon/komputer dalam WiFi yang sama)")
     notif = Notifikasi()
     stor.notif = notif
@@ -1824,6 +1887,8 @@ def main():
                    help='kamera bernama; ulang untuk beberapa kamera, cth --kamera "Pintu Depan=rtsp://..." '
                         '--kamera "Pagar=rtsp://...". Format "Nama=URL_kenal|URL_hd" untuk rakam HD dari strim lain')
     m.add_argument("--port", type=int, default=8000, help="port page web (0 = tutup page web)")
+    m.add_argument("--port-https", type=int, default=8443,
+                   help="port page web HTTPS, perlu untuk guna kamera telefon dalam page web (0 = tutup)")
     m.add_argument("--kata-laluan", help="kata laluan untuk page web (nama pengguna: apa-apa)")
     m.add_argument("--model", choices=["arcface", "sface"], default="arcface",
                    help="arcface = paling tepat (InsightFace, lebih berat); sface = ringan (OpenCV). Default arcface")

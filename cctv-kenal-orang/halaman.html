@@ -78,6 +78,16 @@
            transition: opacity .2s; pointer-events: none; max-width: calc(100% - 32px); }
   #toast.tunjuk { opacity: 1; }
   .fail-input { display: none; }
+  .video-wrap { position: relative; margin-top: 12px; border-radius: 12px; overflow: hidden; background: #000; max-width: 520px; }
+  #video-daftar { width: 100%; display: block; }
+  #video-daftar.cermin { transform: scaleX(-1); }
+  .bujur { position: absolute; left: 50%; top: 48%; width: 46%; aspect-ratio: 3 / 4; transform: translate(-50%, -50%);
+           border: 3px dashed rgba(255,255,255,.8); border-radius: 50%; pointer-events: none; }
+  .bujur.tangkap { border-color: #22c55e; border-style: solid; }
+  #arahan-kamera { position: absolute; left: 0; right: 0; bottom: 0; padding: 10px; text-align: center; color: #fff;
+                   font-weight: 600; font-size: 17px; background: linear-gradient(transparent, rgba(0,0,0,.75)); }
+  #hasil-tangkap .gmb { cursor: default; }
+  .tanda { position: absolute; right: 3px; top: 3px; font-size: 14px; }
   .pilih { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--pudar); cursor: pointer; }
   .pilih input { width: 18px; height: 18px; accent-color: var(--utama); margin: 0; }
   .kad.dipilih { outline: 2px solid var(--utama); outline-offset: -1px; }
@@ -147,6 +157,28 @@
         <input type="text" id="nama-tambah" placeholder="Nama" list="senarai-nama" autocomplete="off">
         <button class="btn utama" id="btn-pilih">Pilih gambar</button>
         <input type="file" id="fail-tambah" class="fail-input" accept="image/*" multiple>
+      </div>
+    </div>
+    <div class="kad" id="kad-kamera">
+      <b>📷 Daftar wajah dengan kamera</b>
+      <p class="pudar" style="margin:4px 0 0">Guna webcam atau kamera telefon. Sistem mengambil 8 gambar dari beberapa sudut.</p>
+      <div class="baris">
+        <input type="text" id="nama-kamera" placeholder="Nama" list="senarai-nama" autocomplete="off">
+        <button class="btn utama" id="btn-buka-kamera">Buka kamera</button>
+      </div>
+      <p class="pudar" id="nota-kamera" hidden></p>
+      <div id="kawasan-kamera" hidden>
+        <div class="video-wrap">
+          <video id="video-daftar" playsinline muted autoplay></video>
+          <div class="bujur" id="bujur"></div>
+          <div id="arahan-kamera">Letakkan wajah dalam bujur</div>
+        </div>
+        <div class="baris">
+          <button class="btn utama" id="btn-mula-tangkap">Mula ambil gambar</button>
+          <button class="btn" id="btn-tukar-kamera">Tukar kamera</button>
+          <button class="btn" id="btn-tutup-kamera">Tutup</button>
+        </div>
+        <div class="grid" id="hasil-tangkap" style="margin-top:10px"></div>
       </div>
     </div>
     <div id="senarai-orang"></div>
@@ -234,7 +266,7 @@ function kemasBarGabung() {
 }
 
 function sibuk() {
-  if (dipilih.size || !$('#lapisan').hidden || !$('#zon-lapis').hidden) return true;
+  if (dipilih.size || !$('#lapisan').hidden || !$('#zon-lapis').hidden || strimKamera) return true;
   const a = document.activeElement;
   if (a && a.tagName === 'INPUT') return true;
   if ([...document.querySelectorAll('input.mesej')].some(i => i.value !== i.defaultValue)) return true;
@@ -499,6 +531,68 @@ $('#btn-gabung').onclick = async () => {
 $('#senarai-baru').addEventListener('keydown', e => {
   if (e.key === 'Enter' && e.target.matches('input')) e.target.closest('.kad').querySelector('[data-tindakan=simpan]').click();
 });
+
+// ---- daftar wajah dengan kamera (webcam / telefon)
+let strimKamera = null, hadapan = 'user', sedangTangkap = false;
+const LANGKAH = [['Pandang tepat ke kamera', 2], ['Toleh sedikit ke kiri', 1], ['Toleh sedikit ke kanan', 1],
+                 ['Dongak sedikit', 1], ['Tunduk sedikit', 1], ['Pandang depan semula', 2]];
+function notaKamera(html) { const n = $('#nota-kamera'); n.hidden = !html; n.innerHTML = html || ''; }
+async function bukaKamera() {
+  if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    const https = data.https ? `https://${location.hostname}:${data.https}/` : null;
+    notaKamera('Pelayar hanya membenarkan kamera pada page <b>https://</b> atau <b>localhost</b>. ' +
+      (https ? `Buka <a href="${https}">${https}</a>, tekan <i>Advanced → Proceed</i> pada amaran keselamatan, kemudian cuba lagi. `
+             : '') + 'Di PC yang menjalankan sistem, buka <b>http://localhost:' + (location.port || 80) + '</b>.');
+    return;
+  }
+  try {
+    tutupKamera();
+    strimKamera = await navigator.mediaDevices.getUserMedia(
+      { video: { facingMode: hadapan, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+    const v = $('#video-daftar'); v.srcObject = strimKamera; v.classList.toggle('cermin', hadapan === 'user');
+    $('#kawasan-kamera').hidden = false; notaKamera('');
+  } catch (e) {
+    notaKamera('Tak dapat buka kamera: ' + esc(e.message || e.name) + '. Benarkan akses kamera untuk page ini dalam tetapan pelayar.');
+  }
+}
+function tutupKamera() {
+  if (strimKamera) strimKamera.getTracks().forEach(t => t.stop());
+  strimKamera = null; $('#kawasan-kamera').hidden = true;
+}
+const tidur = ms => new Promise(r => setTimeout(r, ms));
+function tangkapBingkai() {
+  const v = $('#video-daftar'), c = document.createElement('canvas');
+  c.width = v.videoWidth; c.height = v.videoHeight; c.getContext('2d').drawImage(v, 0, 0);
+  return new Promise(r => c.toBlob(r, 'image/jpeg', 0.92));
+}
+async function mulaTangkap() {
+  const nama = $('#nama-kamera').value.trim();
+  if (!nama) { toast('Taip nama dahulu'); $('#nama-kamera').focus(); return; }
+  if (sedangTangkap || !strimKamera) return;
+  sedangTangkap = true; $('#btn-mula-tangkap').disabled = true; $('#hasil-tangkap').innerHTML = '';
+  let ok = 0, n = 0; const janji = [];
+  for (const [arahan, kali] of LANGKAH) {
+    for (let i = 0; i < kali; i++) {
+      $('#arahan-kamera').textContent = arahan; await tidur(i ? 700 : 1300);
+      $('#bujur').classList.add('tangkap'); const blob = await tangkapBingkai(); n++;
+      setTimeout(() => $('#bujur').classList.remove('tangkap'), 150);
+      const url = URL.createObjectURL(blob), el = document.createElement('div');
+      el.className = 'gmb'; el.innerHTML = `<img src="${url}" alt=""><span class="tanda">⏳</span>`; $('#hasil-tangkap').append(el);
+      janji.push(post('/api/muat-naik?nama=' + encodeURIComponent(nama), blob, 'image/jpeg')
+        .then(() => { ok++; el.querySelector('.tanda').textContent = '✅'; })
+        .catch(() => { el.querySelector('.tanda').textContent = '❌'; el.title = 'Tiada wajah dikesan'; }));
+    }
+  }
+  $('#arahan-kamera').textContent = 'Memproses...'; await Promise.allSettled(janji);
+  $('#arahan-kamera').textContent = 'Selesai!'; await tidur(1200);
+  toast(ok ? `${ok} daripada ${n} gambar didaftar untuk ${nama}` : 'Tiada wajah dikesan. Dekatkan wajah dan cuba lagi.');
+  sedangTangkap = false; $('#btn-mula-tangkap').disabled = false;
+  if (ok) { tutupKamera(); muat(true); }
+}
+$('#btn-buka-kamera').onclick = bukaKamera;
+$('#btn-tutup-kamera').onclick = tutupKamera;
+$('#btn-mula-tangkap').onclick = mulaTangkap;
+$('#btn-tukar-kamera').onclick = () => { hadapan = hadapan === 'user' ? 'environment' : 'user'; bukaKamera(); };
 
 // ---- orang berdaftar
 $('#btn-pilih').onclick = () => {
