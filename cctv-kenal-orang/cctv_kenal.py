@@ -31,6 +31,10 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+# Senyapkan mesej penyahkod FFmpeg (cth "[h264] error while decoding MB") yang keluar bila paket video
+# rosak/hilang (WiFi lemah). Bingkai tetap dibaca; set OPENCV_FFMPEG_LOGLEVEL=24 untuk lihat semula.
+os.environ.setdefault("OPENCV_FFMPEG_LOGLEVEL", "-8")
+
 import cv2
 import numpy as np
 
