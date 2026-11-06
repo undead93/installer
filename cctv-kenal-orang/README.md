@@ -198,6 +198,25 @@ supaya WhatsApp tidak memutuskan peranti yang dipautkan.
 2. Semasa sistem berjalan, buka `http://127.0.0.1:3001/kumpulan` di Mac. Salin `id` kumpulan, contohnya `120363012345678901@g.us`.
 3. Set `export WHATSAPP_KE="120363012345678901@g.us"`. Anda boleh campur ID kumpulan dengan nombor biasa, dipisah koma.
 
+### Bot WhatsApp: tanya sistem melalui chat
+
+Hantar mesej kepada **nombor CCTV**, dan bot akan membalas:
+
+| Hantar | Balasan |
+|---|---|
+| `siapa` / `siapa di rumah` | 🟢 Siapa di rumah dan sejak bila, ⚪ siapa yang keluar |
+| `log` | Senarai masuk/keluar hari ini, dan siapa dikesan hari ini |
+| `gambar` / `gambar pagar` | Gambar terkini dari semua kamera, atau dari satu kamera |
+| `menu` | Senarai arahan |
+
+- Bot **hanya membalas nombor dalam `WHATSAPP_KE`**, dan kumpulan yang disenaraikan di situ. Untuk benarkan nombor lain
+  bertanya tanpa menerima notifikasi, set `WHATSAPP_ADMIN="0123456789,0198765432"`.
+- Dalam kumpulan, bot hanya membalas arahan yang dikenali, dan perbualan biasa diabaikan.
+- Kalau bot tidak membalas mesej peribadi dari nombor anda, tambah nombor anda dalam `WHATSAPP_ADMIN`.
+  WhatsApp kini kadang-kadang menyembunyikan nombor pengirim (ID `@lid`).
+- Bot memerlukan page web (`--port`) dihidupkan, kerana mesej masuk diproses melaluinya. Ia tetap berfungsi
+  walaupun page web dikunci dengan `--kata-laluan`.
+
 ### Kawalan
 
 - Dalam tab **Orang berdaftar**, setiap orang ada suis *Hantar notifikasi*. Matikan suis untuk orang yang anda tak perlu dimaklumkan.

@@ -953,6 +953,101 @@ class Stor:
                 self.tetapan["zon"].pop(kamera, None)
             self._simpan_tetapan()
 
+    # ---- bot WhatsApp: balas arahan dari ahli keluarga
+    def _wa_dibenarkan(self, d):
+        wa = self.notif.whatsapp if self.notif else None
+        senarai = (wa.ke if wa else []) + [x.strip() for x in os.environ.get("WHATSAPP_ADMIN", "").split(",") if x.strip()]
+        nombor, kumpulan = set(), set()
+        for e in senarai:
+            if "@g.us" in e:
+                kumpulan.add(e)
+            else:
+                n = re.sub(r"\D", "", e)
+                nombor.add("6" + n if n.startswith("0") else n)
+        if d.get("chat") in kumpulan:
+            return True
+        for c in [d.get("chat", "")] + list(d.get("dari") or []):
+            if c and not c.endswith(("@lid", "@g.us")) and re.sub(r"\D", "", c.split("@")[0].split(":")[0]) in nombor:
+                return True
+        return False
+
+    @staticmethod
+    def _masa_mesra(t):
+        dt = datetime.fromtimestamp(t)
+        return dt.strftime("%I:%M %p").lstrip("0") if dt.date() == datetime.now().date() \
+            else dt.strftime("%d/%m %I:%M %p")
+
+    def teks_siapa(self):
+        baris = [f"🏠 *Siapa di rumah* ({datetime.now():%d/%m %I:%M %p})"]
+        semua = sorted(set(self.nama.tolist()) | set(self.status))
+        di_rumah = [n for n in semua if self.status.get(n, {}).get("arah") == "masuk"]
+        keluar = [n for n in semua if self.status.get(n, {}).get("arah") == "keluar"]
+        tiada = [n for n in semua if n not in self.status]
+        for n in di_rumah:
+            baris.append(f"🟢 {n} – di rumah sejak {self._masa_mesra(self.status[n]['masa'])}")
+        for n in keluar:
+            baris.append(f"⚪ {n} – keluar {self._masa_mesra(self.status[n]['masa'])}")
+        for n in tiada:
+            baris.append(f"❔ {n} – tiada rekod masuk/keluar")
+        if len(baris) == 1:
+            baris.append("Belum ada orang berdaftar.")
+        if not di_rumah and not keluar:
+            baris.append("\n_Tetapkan 'Arah kamera' dalam page web supaya masuk/keluar direkod._")
+        return "\n".join(baris)
+
+    def teks_log(self):
+        baris = [f"📋 *Log hari ini* ({datetime.now():%d/%m})"]
+        rekod = []
+        if self.log_path and self.log_path.exists():
+            with open(self.log_path, newline="", encoding="utf-8") as fh:
+                rekod = list(csv.reader(fh))[1:]
+        arah = [r for r in rekod if len(r) > 5 and r[5] in ("masuk", "keluar")]
+        for r in arah[-25:]:
+            ikon, kata = ("🟢", "masuk") if r[5] == "masuk" else ("⚪", "keluar")
+            baris.append(f"{r[0][11:16]} {ikon} {r[1]} {kata}" + (f" ({r[4]})" if len(r) > 4 and r[4] else ""))
+        dikesan = {}
+        for r in rekod:
+            if len(r) > 1 and not (len(r) > 5 and r[5]):
+                n = r[1]
+                dikesan[n] = (dikesan.get(n, (0, ""))[0] + 1, r[0][11:16])
+        if dikesan:
+            baris.append("\n👀 *Dikesan hari ini:*")
+            for n, (bil, akhir) in sorted(dikesan.items(), key=lambda kv: kv[1][1], reverse=True)[:15]:
+                baris.append(f"• {n} – {bil}x, terakhir {akhir}")
+        if len(baris) == 1:
+            baris.append("Belum ada rekod hari ini.")
+        return "\n".join(baris)
+
+    def jawab_wa(self, d):
+        """-> senarai balasan [{teks, gambar?}] untuk satu mesej WhatsApp masuk ([] = tidak dibalas)."""
+        if not self._wa_dibenarkan(d):
+            return []
+        t = re.sub(r"\s+", " ", (d.get("teks") or "").lower()).strip().lstrip("!/#.")
+        kumpulan = str(d.get("chat", "")).endswith("@g.us")
+        if re.match(r"^(siapa|siapa di ?rumah|siapa ada|status|rumah)\b", t):
+            return [{"teks": self.teks_siapa()}]
+        if re.match(r"^(log|rekod|sejarah)\b", t):
+            return [{"teks": self.teks_log()}]
+        if re.match(r"^(gambar|foto|snap|tengok|lihat|kamera|cctv)\b", t):
+            balas = []
+            for nama in self.kamera:
+                if any(k in t for k in nama.lower().split()) or not any(
+                        any(k in t for k in n.lower().split()) for n in self.kamera):
+                    _, jpg = self.jpg_terkini(nama)
+                    if jpg:
+                        balas.append({"teks": f"📷 {nama} – {datetime.now():%I:%M %p}".replace(" 0", " "),
+                                      "gambar": base64.b64encode(jpg).decode()})
+            return balas or [{"teks": "Tiada gambar kamera buat masa ini."}]
+        if re.match(r"^(menu|bantuan|help|arahan|hi|hai|helo|hello)\b", t) or not kumpulan:
+            kam = ", ".join(self.kamera) or "-"
+            return [{"teks": "🤖 *CCTV Kenal Orang* – arahan:\n"
+                             "• *siapa* – siapa di rumah sekarang\n"
+                             "• *log* – masuk/keluar & siapa dikesan hari ini\n"
+                             f"• *gambar* – gambar terkini semua kamera ({kam})\n"
+                             "• *gambar <nama kamera>* – gambar satu kamera\n"
+                             "• *menu* – senarai ini"}]
+        return []  # dalam kumpulan: abaikan perbualan biasa
+
     def bingkai_terkini(self):
         """Bingkai terbaru dari kamera pertama (untuk notifikasi ujian), atau None."""
         for nama, kam in self.kamera.items():
@@ -1126,9 +1221,19 @@ def mula_web(stor, port, kata_laluan, port_https=0):
                 time.sleep(0.07)  # ~12-15 bingkai sesaat
 
         def do_POST(self):
+            url = urllib.parse.urlparse(self.path)
+            dari_pc_ini = self.client_address[0] in ("127.0.0.1", "::1")
+            if url.path == "/api/wa-masuk":  # mesej WhatsApp masuk dari penghantar (komputer ini sahaja)
+                if not dari_pc_ini:
+                    return self._json({"ralat": "tidak dibenarkan"}, 403)
+                d = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+                try:
+                    return self._json({"balas": stor.jawab_wa(d)})
+                except Exception as e:
+                    print(f"[bot] ralat: {e}")
+                    return self._json({"balas": []})
             if not self._auth():
                 return
-            url = urllib.parse.urlparse(self.path)
             panjang = int(self.headers.get("Content-Length", 0))
             if panjang > 20_000_000:
                 return self._json({"ralat": "Fail terlalu besar."}, 413)
@@ -1275,9 +1380,14 @@ class WhatsApp:
         except Exception:
             return {"status": "tiada", "nombor": None, "qr": None}
 
-    def mula(self):
-        """Jalankan whatsapp/server.mjs jika belum berjalan."""
+    def mula(self, panggil_balik=None):
+        """Jalankan whatsapp/server.mjs jika belum berjalan. `panggil_balik`: URL untuk mesej WhatsApp masuk (bot)."""
         if self.status()["status"] != "tiada":
+            if panggil_balik:  # penghantar sudah berjalan: beritahu ke mana mesej masuk perlu dihantar
+                try:
+                    _post_json(self.url + "/panggil-balik", {"url": panggil_balik}, timeout=3)
+                except Exception:
+                    pass
             return
         node = shutil.which("node")
         if not node:
@@ -1287,7 +1397,10 @@ class WhatsApp:
             print("[whatsapp] Jalankan sekali dahulu:  cd whatsapp && npm install")
             return
         port = urllib.parse.urlparse(self.url).port or 3001
-        self.proses = subprocess.Popen([node, "server.mjs"], cwd=WA_DIR, env={**os.environ, "WA_PORT": str(port)})
+        env = {**os.environ, "WA_PORT": str(port)}
+        if panggil_balik:
+            env["WA_PY"] = panggil_balik
+        self.proses = subprocess.Popen([node, "server.mjs"], cwd=WA_DIR, env=env)
         atexit.register(self.proses.terminate)
         for _ in range(50):  # tunggu API sedia
             if self.status()["status"] != "tiada":
@@ -1311,11 +1424,11 @@ class WhatsApp:
 
 
 class Notifikasi:
-    def __init__(self):
+    def __init__(self, panggil_balik=None):
         self.whatsapp = WhatsApp()
         self.saluran = [s for s in (self.whatsapp, Telegram()) if s.aktif]
         if self.whatsapp.aktif:
-            self.whatsapp.mula()
+            self.whatsapp.mula(panggil_balik)
 
     @property
     def nama(self):
@@ -1700,7 +1813,7 @@ def cmd_pantau(a):
     if a.port:
         pautan = mula_web(stor, a.port, a.kata_laluan, a.port_https)
         print(f"Page web: {pautan}  (buka dari telefon/komputer dalam WiFi yang sama)")
-    notif = Notifikasi()
+    notif = Notifikasi(f"http://127.0.0.1:{a.port}/api/wa-masuk" if a.port else None)
     stor.notif = notif
     print("Notifikasi:", ", ".join(notif.nama) or "tiada (set WHATSAPP_KE untuk WhatsApp, lihat README)")
     senyap = stor.tetapan["senyap"]

@@ -5,6 +5,11 @@
 //   GET  /status    -> { status, nombor, qr }   qr = gambar QR (data URL) semasa perlu diimbas
 //   GET  /kumpulan  -> senarai kumpulan WhatsApp { id, nama }
 //   POST /hantar    { ke: ["0123456789", "1203...@g.us"], teks, gambar?: base64 JPEG, video?: base64 MP4 }
+//   POST /panggil-balik { url }   ke mana mesej WhatsApp masuk dihantar (cctv_kenal.py /api/wa-masuk)
+//   POST /uji-masuk { chat, dari, teks }   ujian: proses mesej masuk tiruan
+//
+// Bot: mesej yang masuk ke nombor ini dihantar ke cctv_kenal.py, yang menentukan sama ada pengirim dibenarkan
+// dan apa balasannya (cth "siapa", "log", "gambar").
 import { makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers, fetchLatestBaileysVersion } from '@whiskeysockets/baileys'
 import QRCode from 'qrcode'
 import pino from 'pino'
@@ -21,6 +26,7 @@ let status = 'memulakan'   // memulakan | imbas_qr | bersambung | terputus
 let qr = null
 let nombor = null
 let cubaan = 0
+let PY = process.env.WA_PY || null   // URL cctv_kenal.py untuk mesej masuk
 
 const log = (...a) => console.log('[whatsapp]', ...a)
 
@@ -37,6 +43,26 @@ async function mula () {
     syncFullHistory: false,
   })
   sock.ev.on('creds.update', saveCreds)
+  sock.ev.on('messages.upsert', async ({ messages, type }) => {
+    if (type !== 'notify') return
+    for (const m of messages) {
+      try {
+        if (!m.message || m.key.fromMe) continue
+        const ts = Number(m.messageTimestamp || 0)
+        if (ts && Date.now() / 1000 - ts > 120) continue          // abaikan mesej lama (semasa offline)
+        const isi = m.message.ephemeralMessage?.message || m.message
+        const teks = isi.conversation || isi.extendedTextMessage?.text || isi.imageMessage?.caption || ''
+        if (!teks.trim()) continue
+        const chat = m.key.remoteJid
+        // nombor pengirim: WhatsApp kini kadang-kadang guna ID @lid; nombor sebenar dalam medan *Alt / *Pn
+        const dari = [m.key.remoteJid, m.key.remoteJidAlt, m.key.participant, m.key.participantAlt,
+                      m.key.senderPn, m.key.participantPn, m.participant].filter(Boolean)
+        await prosesMasuk({ chat, dari, teks, kumpulan: String(chat).endsWith('@g.us') }, m)
+      } catch (e) {
+        log('Gagal proses mesej masuk:', e.message)
+      }
+    }
+  })
   sock.ev.on('connection.update', async (u) => {
     if (u.qr) {
       qr = u.qr
@@ -66,6 +92,21 @@ async function mula () {
       setTimeout(mula, Math.min(30000, 1000 * 2 ** Math.min(cubaan, 5)))
     }
   })
+}
+
+async function prosesMasuk (d, asal) {
+  if (!PY) return
+  const r = await fetch(PY, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(d) })
+  if (!r.ok) return
+  const { balas = [] } = await r.json()
+  for (const b of balas) {
+    if (KERING) {
+      log(`[KERING] balas ke ${d.chat}: ${(b.teks || '').replace(/\n/g, ' | ')}${b.gambar ? ' (+gambar)' : ''}`)
+      continue
+    }
+    const mesej = b.gambar ? { image: Buffer.from(b.gambar, 'base64'), caption: b.teks || '' } : { text: b.teks }
+    await sock.sendMessage(d.chat, mesej, asal ? { quoted: asal } : {})
+  }
 }
 
 function jid (ke) {
@@ -117,6 +158,17 @@ http.createServer(async (req, res) => {
       if (status !== 'bersambung') return json(res, 409, { ralat: 'WhatsApp belum bersambung' })
       const g = await sock.groupFetchAllParticipating()
       return json(res, 200, Object.values(g).map(x => ({ id: x.id, nama: x.subject })))
+    }
+    if (req.method === 'POST' && (req.url === '/panggil-balik' || req.url === '/uji-masuk')) {
+      const bahagian = []
+      for await (const c of req) bahagian.push(c)
+      const d = JSON.parse(Buffer.concat(bahagian).toString() || '{}')
+      if (req.url === '/panggil-balik') {
+        PY = d.url || null
+        return json(res, 200, { ok: true })
+      }
+      await prosesMasuk(d, null)
+      return json(res, 200, { ok: true })
     }
     if (req.method === 'POST' && req.url === '/hantar') {
       const bahagian = []
