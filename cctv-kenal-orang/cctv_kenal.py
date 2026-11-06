@@ -26,6 +26,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+import zipfile
 from collections import deque
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -70,8 +71,26 @@ def senarai_gambar(folder):
     return sorted(p for p in folder.iterdir() if p.suffix.lower() in IMG_EXT) if folder.is_dir() else []
 
 
+AKHIRAN_CIRI = {"sface": ".npy", "arcface": ".arc.npy"}  # cap jari wajah disimpan berasingan bagi setiap model
+_akhiran_semasa = [".npy"]
+
+
 def fail_ciri(img_path):
-    return img_path.with_name(img_path.name + ".npy")
+    """Fail cap jari wajah untuk model yang sedang digunakan."""
+    return img_path.with_name(img_path.name + _akhiran_semasa[0])
+
+
+def pindah_ciri(src, dst):
+    """Pindah fail cap jari (semua model) bersama gambarnya."""
+    for a in AKHIRAN_CIRI.values():
+        f = src.with_name(src.name + a)
+        if f.exists():
+            shutil.move(str(f), str(dst.with_name(dst.name + a)))
+
+
+def padam_ciri(img_path):
+    for a in AKHIRAN_CIRI.values():
+        img_path.with_name(img_path.name + a).unlink(missing_ok=True)
 
 
 def ip_lan():
@@ -108,6 +127,9 @@ def pastikan_model():
 
 
 class Enjin:
+    """SFace (OpenCV): ringan."""
+    nama, dim = "sface", 128
+
     def __init__(self, skor_kesan=0.8, lebar_kesan=DETECT_WIDTH):
         pastikan_model()
         self.lebar_kesan = lebar_kesan
@@ -145,6 +167,147 @@ class Enjin:
         return self.ciri(img, max(faces, key=lambda f: f[2] * f[3]))
 
 
+ARC_ZIP = "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip"
+ARC_FAIL = ("det_10g.onnx", "w600k_r50.onnx")
+# kedudukan standard 5 titik wajah (mata, hidung, mulut) dalam gambar 112x112 untuk ArcFace
+ARC_DST = np.array([[38.2946, 51.6963], [73.5318, 51.5014], [56.0252, 71.7366],
+                    [41.5493, 92.3655], [70.7299, 92.2041]], np.float32)
+
+
+def pastikan_model_arcface():
+    d = MODEL_DIR / "buffalo_l"
+    d.mkdir(parents=True, exist_ok=True)
+    if all((d / f).exists() and (d / f).stat().st_size > 1_000_000 for f in ARC_FAIL):
+        return d
+    print("[model] muat turun model ArcFace + SCRFD (InsightFace buffalo_l, ~290MB, sekali sahaja) ...")
+    tmp = d / "buffalo_l.zip.part"
+    langkah = [0]
+
+    def kemajuan(blok, saiz, jumlah):
+        if jumlah > 0 and blok * saiz * 10 // jumlah > langkah[0]:
+            langkah[0] = blok * saiz * 10 // jumlah
+            print(f"[model]   {min(100, langkah[0] * 10)}%")
+    urllib.request.urlretrieve(ARC_ZIP, tmp, kemajuan)
+    with zipfile.ZipFile(tmp) as z:
+        for f in ARC_FAIL:
+            nama = next(n for n in z.namelist() if n.endswith(f))
+            with z.open(nama) as src, open(d / f, "wb") as dst:
+                shutil.copyfileobj(src, dst)
+    tmp.unlink()
+    return d
+
+
+class EnjinArcFace:
+    """SCRFD (kesan wajah) + ArcFace R50 (kenal wajah) dari InsightFace, melalui onnxruntime.
+    Lebih tepat dari SFace, terutama untuk wajah kecil/condong; lebih berat. Model: kegunaan bukan komersial."""
+    nama, dim = "arcface", 512
+
+    def __init__(self, skor_kesan=0.5, lebar_kesan=DETECT_WIDTH):
+        import onnxruntime as ort
+        d = pastikan_model_arcface()
+        so = ort.SessionOptions()
+        so.log_severity_level = 3
+        pv = ["CPUExecutionProvider"]
+        self.det = ort.InferenceSession(str(d / "det_10g.onnx"), so, providers=pv)
+        self.rec = ort.InferenceSession(str(d / "w600k_r50.onnx"), so, providers=pv)
+        self.det_in, self.rec_in = self.det.get_inputs()[0].name, self.rec.get_inputs()[0].name
+        self.skor_kesan, self.lebar_kesan = skor_kesan, lebar_kesan
+        self.kunci = threading.Lock()
+
+    def kesan(self, img):
+        h, w = img.shape[:2]
+        if w > self.lebar_kesan:
+            skala = self.lebar_kesan / w
+        elif max(w, h) < 640:
+            skala = 640 / max(w, h)  # gambar kecil (cth potongan wajah) dibesarkan supaya wajah dikesan
+        else:
+            skala = 1.0
+        nw, nh = max(1, int(w * skala)), max(1, int(h * skala))
+        W32, H32 = -(-nw // 32) * 32, -(-nh // 32) * 32
+        kanvas = np.zeros((H32, W32, 3), np.uint8)
+        kanvas[:nh, :nw] = cv2.resize(img, (nw, nh)) if skala != 1.0 else img
+        blob = cv2.dnn.blobFromImage(kanvas, 1 / 128, (W32, H32), (127.5, 127.5, 127.5), swapRB=True)
+        with self.kunci:
+            outs = self.det.run(None, {self.det_in: blob})
+        outs = [o[0] if o.ndim == 3 else o for o in outs]
+        ikut = lambda d: sorted((o for o in outs if o.shape[-1] == d), key=lambda o: -o.shape[0])
+        sk, bb, kp = ikut(1), ikut(4), ikut(10)
+        kotak, skor, titik = [], [], []
+        for i, stride in enumerate((8, 16, 32)):
+            fh, fw = H32 // stride, W32 // stride
+            pusat = (np.stack(np.mgrid[:fh, :fw][::-1], axis=-1).reshape(-1, 2).astype(np.float32) * stride)
+            pusat = np.repeat(pusat, sk[i].shape[0] // (fh * fw), axis=0)
+            s = sk[i].reshape(-1)
+            pos = np.flatnonzero(s >= self.skor_kesan)
+            if not len(pos):
+                continue
+            c, d = pusat[pos], bb[i][pos] * stride
+            kotak.append(np.stack([c[:, 0] - d[:, 0], c[:, 1] - d[:, 1], c[:, 0] + d[:, 2], c[:, 1] + d[:, 3]], 1))
+            titik.append((kp[i][pos] * stride).reshape(-1, 5, 2) + c[:, None, :])
+            skor.append(s[pos])
+        if not kotak:
+            return []
+        kotak, skor, titik = np.vstack(kotak), np.hstack(skor), np.vstack(titik)
+        xywh = [[float(a), float(b), float(c - a), float(d - b)] for a, b, c, d in kotak]
+        pilih = np.array(cv2.dnn.NMSBoxes(xywh, skor.tolist(), self.skor_kesan, 0.4)).reshape(-1)
+        out = []
+        for j in pilih:
+            x1, y1, x2, y2 = kotak[j] / skala
+            out.append(np.array([x1, y1, x2 - x1, y2 - y1, *(titik[j] / skala).reshape(-1), skor[j]], np.float32))
+        return out
+
+    def ciri(self, img, face):
+        M, _ = cv2.estimateAffinePartial2D(np.asarray(face[4:14], np.float32).reshape(5, 2), ARC_DST, method=cv2.LMEDS)
+        if M is None:
+            M = cv2.getAffineTransform(np.asarray(face[4:10], np.float32).reshape(3, 2), ARC_DST[:3])
+        crop = cv2.warpAffine(img, M, (112, 112), borderValue=0)
+        blob = cv2.dnn.blobFromImage(crop, 1 / 127.5, (112, 112), (127.5, 127.5, 127.5), swapRB=True)
+        with self.kunci:
+            f = self.rec.run(None, {self.rec_in: blob})[0].flatten()
+        return (f / (np.linalg.norm(f) + 1e-9)).astype(np.float32)
+
+    def ciri_gambar(self, img):
+        faces = self.kesan(img)
+        if not faces:
+            # gambar kad dipotong rapat pada muka: SCRFD perlukan ruang di sekeliling wajah, jadi tambah bingkai
+            t = int(max(img.shape[:2]) * 0.5)
+            img = cv2.copyMakeBorder(img, t, t, t, t, cv2.BORDER_CONSTANT, value=(110, 110, 110))
+            faces = self.kesan(img)
+        if not faces:
+            return None
+        return self.ciri(img, max(faces, key=lambda f: f[2] * f[3]))
+
+
+# had skor lalai bagi setiap model (skala skor kedua-dua model berbeza)
+LALAI_AMBANG = {
+    "sface": {"ambang": 0.363, "ambang_kumpul": 0.38, "ambang_maklum": 0.42},
+    # diukur pada 41 orang x keadaan CCTV (kecil/kabur/gelap/IR): 0.35 -> 99% orang sama diterima,
+    # 0.06% orang lain tersalah diterima; 0.40 -> 0.02%
+    "arcface": {"ambang": 0.35, "ambang_kumpul": 0.38, "ambang_maklum": 0.40},
+}
+
+
+def isi_ambang_lalai(a, enjin):
+    for k, v in LALAI_AMBANG[enjin.nama].items():
+        if getattr(a, k, None) is None:
+            setattr(a, k, v)
+
+
+def buat_enjin(model="arcface", lebar_kesan=None):
+    """Pilih enjin; jika ArcFace tidak dapat dimuat (cth tiada internet/onnxruntime), guna SFace."""
+    enjin = None
+    if model == "arcface":
+        try:
+            enjin = EnjinArcFace(lebar_kesan=lebar_kesan or 960)  # SCRFD@960 kesan wajah dari ~44px pada 2K
+        except Exception as e:
+            print(f"[model] ArcFace tidak dapat dimuat ({e}). Guna SFace.")
+    if enjin is None:
+        enjin = Enjin(lebar_kesan=lebar_kesan or DETECT_WIDTH)
+    _akhiran_semasa[0] = AKHIRAN_CIRI[enjin.nama]
+    print(f"Model kenal wajah: {'ArcFace + SCRFD (InsightFace)' if enjin.nama == 'arcface' else 'SFace + YuNet (OpenCV)'}")
+    return enjin
+
+
 # ---------------------------------------------------------------- stor data
 FON = cv2.FONT_HERSHEY_SIMPLEX
 
@@ -174,6 +337,16 @@ def lukis_kad_muka(img, peristiwa, sekarang, tempoh=60, maks=4):
             sk = 0.42 * bh / 16
             cv2.putText(img, teks, (x + 3, ty), FON, sk, (255, 255, 255), 1, cv2.LINE_AA)
         y += saiz + 2 * bh + 10
+
+
+def iou(a, b):
+    """Pertindihan dua kotak (x, y, w, h): 0 = tiada, 1 = sama."""
+    ax, ay, aw, ah = (float(v) for v in a[:4])
+    bx, by, bw, bh = (float(v) for v in b[:4])
+    iw = max(0.0, min(ax + aw, bx + bw) - max(ax, bx))
+    ih = max(0.0, min(ay + ah, by + bh) - max(ay, by))
+    sama = iw * ih
+    return sama / (aw * ah + bw * bh - sama + 1e-9)
 
 
 def potong_segi(img, face, saiz=160):
@@ -244,7 +417,7 @@ class Stor:
                 print(f"{d.name}: {n} gambar")
         with self.kunci:
             self.nama = np.array(nama)
-            self.ciri = np.stack(ciri) if ciri else np.zeros((0, 128), np.float32)
+            self.ciri = np.stack(ciri) if ciri else np.zeros((0, self.enjin.dim), np.float32)
             self.fail_orang = fail
             self.indeks_nama = {n: np.flatnonzero(self.nama == n) for n in set(nama)}
             if not hasattr(self, "kiraan_padan"):
@@ -274,15 +447,23 @@ class Stor:
         self.kumpulan = {}
         for d in sorted(p for p in WAJAH_BARU.iterdir() if p.is_dir()):
             fail, ciri = [], []
-            for img_path in senarai_gambar(d):
+            gambar = senarai_gambar(d)
+            for img_path in gambar:
                 npy = fail_ciri(img_path)
                 if npy.exists():
-                    fail.append(img_path)
-                    ciri.append(np.load(npy))
+                    f = np.load(npy)
+                else:  # cth selepas tukar model: kira semula dari gambar yang disimpan
+                    im = cv2.imread(str(img_path))
+                    f = self.enjin.ciri_gambar(im) if im is not None else None
+                    if f is None:
+                        continue
+                    np.save(npy, f)
+                fail.append(img_path)
+                ciri.append(f)
             if fail:
                 self.kumpulan[d.name] = {"fail": fail, "ciri": ciri, "akhir_simpan": 0.0,
                                          "akhir_lihat": max(p.stat().st_mtime for p in fail)}
-            else:
+            elif not gambar:
                 shutil.rmtree(d, ignore_errors=True)
 
     def kenal(self, f):
@@ -400,7 +581,7 @@ class Stor:
                     baru = d / f"{sid[-4:]}_{p.name}"
                     try:
                         shutil.move(str(p), baru)
-                        shutil.move(str(fail_ciri(p)), fail_ciri(baru))
+                        pindah_ciri(p, baru)
                     except OSError:
                         continue
                     k["fail"].append(baru)
@@ -498,7 +679,7 @@ class Stor:
                 if p.name in keluarkan:
                     continue
                 shutil.move(str(p), dest / f"{kid}_{p.name}")
-                shutil.move(str(fail_ciri(p)), fail_ciri(dest / f"{kid}_{p.name}"))
+                pindah_ciri(p, dest / f"{kid}_{p.name}")
             shutil.rmtree(WAJAH_BARU / kid, ignore_errors=True)
             self.muat_orang()
             if gabung:
@@ -514,7 +695,7 @@ class Stor:
         with self.kunci:
             if p.parent.parent == ORANG:
                 p.unlink(missing_ok=True)
-                fail_ciri(p).unlink(missing_ok=True)
+                padam_ciri(p)
                 if not senarai_gambar(p.parent):
                     shutil.rmtree(p.parent, ignore_errors=True)
                 self.muat_orang()
@@ -525,7 +706,7 @@ class Stor:
                     k["fail"].pop(i)
                     k["ciri"].pop(i)
                 p.unlink(missing_ok=True)
-                fail_ciri(p).unlink(missing_ok=True)
+                padam_ciri(p)
                 if k is not None and not k["fail"]:
                     self.buang_kumpulan(p.parent.name)
 
@@ -541,8 +722,7 @@ class Stor:
             if dest.exists():
                 dest = dest_dir / f"{p.parent.name}_{p.name}"
             shutil.move(str(p), dest)
-            if fail_ciri(p).exists():
-                shutil.move(str(fail_ciri(p)), fail_ciri(dest))
+            pindah_ciri(p, dest)
             if not senarai_gambar(p.parent):
                 shutil.rmtree(p.parent, ignore_errors=True)
             self.kiraan_padan.pop(str(p), None)
@@ -1332,7 +1512,8 @@ class Kamera:
 
 # ---------------------------------------------------------------- arahan
 def cmd_daftar(a):
-    stor = Stor(Enjin())
+    enjin = buat_enjin(a.model)
+    stor = Stor(enjin, LALAI_AMBANG[enjin.nama]["ambang"], LALAI_AMBANG[enjin.nama]["ambang_kumpul"])
     stor.muat_orang(verbose=True)
     print(f"\nSiap: {len(set(stor.nama))} orang, {len(stor.nama)} gambar berdaftar.")
 
@@ -1347,6 +1528,10 @@ class KonteksKamera:
         self.t_proses = 0.0
         self.penulis = None
         self.calon = {}        # kunci -> deque[(masa, skor)]: pengesanan terkini sebelum disahkan
+        self.kelabu_lepas = None  # bingkai kecil sebelumnya (untuk kesan gerakan)
+        self.wajah_akhir = 0.0    # masa terakhir wajah dikesan
+        self.kesan_akhir = 0.0    # masa terakhir pengesanan wajah dijalankan
+        self.cache = []           # [(kotak, cap jari, masa)] dari bingkai sebelumnya
         self.kad_baru = set()  # kad orang asing yang baru dicipta (untuk label 🆕)
 
 
@@ -1368,7 +1553,9 @@ def senarai_kamera(a):
 
 
 def cmd_pantau(a):
-    enjin = Enjin(lebar_kesan=a.lebar_kesan)
+    enjin = buat_enjin(a.model, a.lebar_kesan)
+    isi_ambang_lalai(a, enjin)
+    print(f"Had skor: kenal {a.ambang} | notifikasi {a.ambang_maklum} | kumpul wajah baru {a.ambang_kumpul}")
     stor = Stor(enjin, a.ambang, a.ambang_kumpul, a.maks_gambar, a.selang_simpan, a.saiz_min)
     stor.bersih(a.simpan_hari)
     print(f"Orang berdaftar: {len(set(stor.nama))} ({', '.join(sorted(set(stor.nama))) or '-'})")
@@ -1456,6 +1643,15 @@ def cmd_pantau(a):
         kam = kk.kam
         sekarang = time.time()
         kotak = []
+        # --- jimat CPU: langkau pengesanan wajah bila tiada gerakan dan tiada wajah baru-baru ini
+        kecil = cv2.GaussianBlur(cv2.cvtColor(cv2.resize(img, (320, 180)), cv2.COLOR_BGR2GRAY), (5, 5), 0)
+        gerak = kk.kelabu_lepas is None or float((cv2.absdiff(kecil, kk.kelabu_lepas) > 25).mean()) > 0.0005
+        kk.kelabu_lepas = kecil
+        if (not a.tanpa_gerakan and not gerak and sekarang - kk.wajah_akhir > 2.0
+                and sekarang - kk.kesan_akhir < 10):
+            stor.set_bingkai(img, [], kk.nama)
+            return
+        kk.kesan_akhir = sekarang
         wajah2 = enjin.kesan(img)
         zon = stor.zon_untuk(kk.nama)
         if zon:  # hanya wajah yang berada dalam zon pengesanan
@@ -1463,8 +1659,19 @@ def cmd_pantau(a):
             wajah2 = [fc for fc in wajah2
                       if zon[0] <= (fc[0] + fc[2] / 2) / W <= zon[2] and zon[1] <= (fc[1] + fc[3] / 2) / H <= zon[3]]
         asal = img.copy() if wajah2 else img  # salinan bersih: kotak/label tidak masuk ke dalam gambar wajah
+        if wajah2:
+            kk.wajah_akhir = sekarang
+        cache_baru = []
         for face in wajah2:
-            f = enjin.ciri(asal, face)
+            # guna semula cap jari wajah yang sama (kedudukan hampir sama) dari bingkai sebelumnya, maks 0.6 saat
+            f = None
+            for kb, kf, kt in kk.cache:
+                if sekarang - kt < 0.6 and iou(face[:4], kb) > 0.5:
+                    f, t_f = kf, kt
+                    break
+            if f is None:
+                f, t_f = enjin.ciri(asal, face), sekarang
+            cache_baru.append((face[:4].copy(), f, t_f))
             nama, skor, kid = stor.kenal(f)
             mungkin = None  # orang asing yang hampir padan dengan ahli keluarga (belum pasti)
             if nama is None:
@@ -1539,6 +1746,7 @@ def cmd_pantau(a):
             k.label.append(nama or "TIDAK-DIKENALI")
             k.asing |= nama is None
 
+        kk.cache = cache_baru
         if kotak:
             kk.anotasi.append((kam.masa, img.shape[1], kotak))
         stor.set_bingkai(img, kotak, kk.nama)
@@ -1607,6 +1815,7 @@ def main():
     sub = p.add_subparsers(dest="cmd", required=True)
 
     d = sub.add_parser("daftar", help="proses gambar dalam orang/<nama>/ (yang anda letak sendiri)")
+    d.add_argument("--model", choices=["arcface", "sface"], default="arcface")
     d.set_defaults(fn=cmd_daftar)
 
     m = sub.add_parser("pantau", help="pantau kamera, kenal orang & buka page web")
@@ -1616,19 +1825,23 @@ def main():
                         '--kamera "Pagar=rtsp://...". Format "Nama=URL_kenal|URL_hd" untuk rakam HD dari strim lain')
     m.add_argument("--port", type=int, default=8000, help="port page web (0 = tutup page web)")
     m.add_argument("--kata-laluan", help="kata laluan untuk page web (nama pengguna: apa-apa)")
-    m.add_argument("--ambang", type=float, default=0.363,
-                   help="had skor untuk dikira 'kenal' (tinggi = lebih ketat). Default 0.363")
-    m.add_argument("--ambang-kumpul", type=float, default=0.38,
-                   help="had skor untuk kumpulkan wajah baru sebagai orang yang sama. Default 0.38")
+    m.add_argument("--model", choices=["arcface", "sface"], default="arcface",
+                   help="arcface = paling tepat (InsightFace, lebih berat); sface = ringan (OpenCV). Default arcface")
+    m.add_argument("--ambang", type=float, default=None,
+                   help="had skor untuk dikira 'kenal' (tinggi = lebih ketat). Lalai ikut model")
+    m.add_argument("--ambang-kumpul", type=float, default=None,
+                   help="had skor untuk kumpulkan wajah baru sebagai orang yang sama. Lalai ikut model")
     m.add_argument("--fps", type=float, default=5, help="bingkai diproses sesaat (0 = semua). Default 5")
     m.add_argument("--cooldown", type=float, default=60,
                    help="saat sebelum orang yang sama dilog/dimaklum semula")
     m.add_argument("--maks-gambar", type=int, default=30, help="maks gambar disimpan bagi setiap wajah baru")
     m.add_argument("--selang-simpan", type=float, default=5, help="saat antara gambar disimpan bagi wajah sama")
     m.add_argument("--saiz-min", type=int, default=60, help="saiz wajah minimum (piksel) untuk disimpan")
-    m.add_argument("--lebar-kesan", type=int, default=DETECT_WIDTH,
-                   help="lebar gambar semasa mencari wajah. 1280 kesan wajah dari ~60px pada kamera 2K; "
-                        "1920 untuk wajah lebih jauh (lebih CPU); 640 untuk PC lemah. Default 1280")
+    m.add_argument("--lebar-kesan", type=int, default=None,
+                   help="lebar gambar semasa mencari wajah. Lalai: 960 untuk arcface (wajah dari ~44px pada 2K), "
+                        "1280 untuk sface (~65px). Naikkan untuk wajah lebih jauh (lebih CPU)")
+    m.add_argument("--tanpa-gerakan", action="store_true",
+                   help="proses setiap bingkai walaupun tiada gerakan (lebih CPU)")
     m.add_argument("--simpan-hari", type=float, default=14,
                    help="padam wajah baru yang tidak dinamakan selepas N hari. Default 14")
     m.add_argument("--papar", action="store_true", help="tunjuk tetingkap video")
@@ -1641,9 +1854,9 @@ def main():
                    help="bilangan pengesanan sebelum notifikasi dihantar. Default 3")
     m.add_argument("--tempoh-sahkan", type=float, default=4,
                    help="dalam berapa saat pengesanan itu mesti berlaku. Default 4")
-    m.add_argument("--ambang-maklum", type=float, default=0.42,
+    m.add_argument("--ambang-maklum", type=float, default=None,
                    help="purata skor minimum untuk hantar notifikasi ahli keluarga (lebih ketat dari --ambang). "
-                        "Default 0.42")
+                        "Lalai ikut model")
     m.add_argument("--tanpa-video", action="store_true", help="hantar gambar sahaja, tanpa klip video")
     m.add_argument("--klip-sebelum", type=float, default=3, help="saat video sebelum orang dikesan. Default 3")
     m.add_argument("--klip-selepas", type=float, default=5, help="saat video selepas orang dikesan. Default 5")

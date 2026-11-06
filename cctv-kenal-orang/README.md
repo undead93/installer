@@ -14,7 +14,7 @@ Sistem ini hanya perlukan OpenCV. GPU tidak diperlukan. Model (~40MB) dimuat tur
 
 ## 1. Pasang
 
-    pip install -r requirements.txt
+    pip install -r requirements.txt     # termasuk onnxruntime untuk ArcFace
 
 Di Mac (Homebrew Python), buat venv dahulu:
 
@@ -226,6 +226,29 @@ Simpan semua baris `export` dalam fail `tetapan.sh`, kemudian jalankan:
 | `--saiz-min` | 60 | Saiz wajah minimum (piksel) untuk disimpan. Wajah yang kecil atau kabur tidak disimpan. |
 | `--papar` | – | Tunjuk tetingkap video di komputer. |
 | `--rakam fail.mp4` | – | Simpan video berlabel. |
+
+## Model AI: ArcFace (lalai) atau SFace
+
+Sistem menggunakan **ArcFace + SCRFD** dari InsightFace secara lalai. Kali pertama sistem dijalankan, model (~290MB)
+dimuat turun secara automatik.
+
+Perbandingan pada 41 orang berbeza, dengan wajah yang dirosakkan seperti rakaman CCTV:
+
+| Keadaan wajah | SFace: betul dikenal | ArcFace: betul dikenal |
+|---|---|---|
+| 90 piksel | 31/41 | **39/41** |
+| 60 piksel | 21/41 | **38/41** |
+| 40 piksel | 17/41 | **32/41** |
+| kabur / gelap / IR | 23 / 20 / 23 | **37 / 33 / 29** |
+| Orang lain tersalah dikenali | 3.2% (had 0.363) | **0.06%** (had 0.35) |
+
+ArcFace lebih berat (~10 kali lebih banyak kerja CPU untuk setiap bingkai). Untuk menjimatkan CPU, sistem:
+- **melangkau pengesanan bila tiada gerakan** dalam gambar (guna `--tanpa-gerakan` untuk matikan ciri ini),
+- **guna semula cap jari wajah** yang sama dari bingkai sebelumnya.
+
+Untuk PC yang lemah, guna `--model sface` (ringan), atau kurangkan `--fps 3`.
+Cap jari wajah setiap model disimpan dalam fail berasingan (`.npy` untuk SFace dan `.arc.npy` untuk ArcFace), jadi anda
+boleh bertukar model tanpa perlu mendaftar semula. Model ArcFace InsightFace hanya untuk **kegunaan bukan komersial**.
 
 ## Tips ketepatan
 
