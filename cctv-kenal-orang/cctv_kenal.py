@@ -148,6 +148,8 @@ class Stor:
                  saiz_min=60):
         self.enjin = enjin
         self.ambang, self.ambang_kumpul = ambang, ambang_kumpul
+        # masukkan kad terus ke orang berdaftar hanya jika sangat serupa (elak orang asing tersalah masuk)
+        self.ambang_serap = max(0.5, ambang_kumpul + 0.1)
         self.maks_gambar, self.selang_simpan, self.saiz_min = maks_gambar, selang_simpan, saiz_min
         self.kunci = threading.RLock()
         self.kamera = {}           # nama -> Kamera (untuk paparan langsung yang lancar)
@@ -156,6 +158,7 @@ class Stor:
         self.kotak = {}            # nama kamera -> (masa, kotak wajah terkini) untuk paparan langsung
         self.log_path = None
         self.notif = None
+        self._diag = {}  # sebab -> masa terakhir dicetak
         try:
             self.tetapan = json.loads(TETAPAN.read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -247,10 +250,16 @@ class Stor:
                 if len(k["fail"]) >= self.maks_gambar or sekarang - k["akhir_simpan"] < self.selang_simpan:
                     return kid, False
             if not self._menghadap(face):
-                return kid, False  # wajah dari sisi: cap jari wajah lemah, mudah jadi kad berasingan
+                self._diagnostik("sisi", "wajah dari sisi (tidak menghadap kamera)")
+                return kid, False  # cap jari wajah lemah, mudah jadi kad berasingan
+            if min(w, h) < self.saiz_min:
+                self._diagnostik("kecil", f"wajah terlalu kecil ({int(min(w, h))}px, minimum {self.saiz_min}px - "
+                                          f"guna --saiz-min untuk ubah)")
+                return kid, False
             crop = self._potong(img, x, y, w, h)
-            if min(w, h) < self.saiz_min or crop is None:
-                return kid, False  # wajah terlalu kecil/kabur untuk disimpan
+            if crop is None:
+                self._diagnostik("kabur", "wajah terlalu kabur")
+                return kid, False
             baru = kid not in self.kumpulan
             if baru:
                 kid = f"{datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:4]}"
@@ -266,15 +275,20 @@ class Stor:
             k["akhir_simpan"] = sekarang
             return kid, baru
 
+    def _diagnostik(self, jenis, sebab):
+        if time.time() - self._diag.get(jenis, 0) > 30:  # maks sekali setiap 30 saat bagi setiap jenis
+            self._diag[jenis] = time.time()
+            print(f"[wajah] orang tidak dikenali dikesan, tetapi gambar tidak disimpan: {sebab}")
+
     @staticmethod
     def _menghadap(face):
         """True jika wajah lebih kurang menghadap kamera (hidung di antara kedua-dua mata)."""
         w = float(face[2])
         m1, m2 = sorted((float(face[4]), float(face[6])))
         lebar = m2 - m1
-        if w <= 0 or lebar < 0.25 * w:
+        if w <= 0 or lebar < 0.2 * w:
             return False
-        return 0.25 <= (float(face[8]) - m1) / lebar <= 0.75
+        return 0.15 <= (float(face[8]) - m1) / lebar <= 0.85
 
     # ---- gabung kad orang yang sama
     @staticmethod
@@ -322,7 +336,8 @@ class Stor:
                         sk = self._skor_set(self.kumpulan[kid]["ciri"], list(self.ciri[self.nama == n]))
                         if sk > terbaik:
                             terbaik, nama = sk, n
-                    if nama and terbaik >= self.ambang_kumpul:
+                    if nama and terbaik >= self.ambang_serap:
+                        print(f"[wajah] kad #{kid[-4:]} dimasukkan ke {nama} (skor {terbaik:.2f})")
                         self.label(kid, nama, gabung=False)
                         dilabel += 1
             berubah = True
