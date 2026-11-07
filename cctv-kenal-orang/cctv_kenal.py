@@ -66,7 +66,7 @@ MIRRORS = [
     "https://media.githubusercontent.com/media/opencv/opencv_zoo/main/",
 ]
 IMG_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
-VERSI = "2026.11.07e"  # dipaparkan dalam terminal & page web, untuk sahkan versi yang sedang berjalan
+VERSI = "2026.11.07f"  # dipaparkan dalam terminal & page web, untuk sahkan versi yang sedang berjalan
 DETECT_WIDTH = 1280  # bingkai besar dikecilkan ke lebar ini untuk kesan wajah (640 terlepas wajah <~135px pada 2K)
 NAMA_SAH = re.compile(r"^[\w][\w .'-]{0,39}$")
 
@@ -345,6 +345,13 @@ def lukis_kad_muka(img, peristiwa, sekarang, tempoh=60, maks=4):
             sk = 0.42 * bh / 16
             cv2.putText(img, teks, (x + 3, ty), FON, sk, (255, 255, 255), 1, cv2.LINE_AA)
         y += saiz + 2 * bh + 10
+
+
+def terang_sama(arah, kamera):
+    """Nota bila pergerakan dikira sama dengan status semasa (cth dikira MASUK tetapi sudah di rumah)."""
+    return (f"dikira {arah.upper()} oleh kamera {kamera} – " +
+            ("sudah di rumah" if arah == "masuk" else "sudah keluar") +
+            ", status tidak berubah. Kalau salah, tukar 'Arah kamera ini' kamera itu dalam tab Langsung")
 
 
 def iou(a, b):
@@ -2038,7 +2045,7 @@ def cmd_pantau(a):
                     catatan["nota"] = "arah gerakan tidak jelas (bergerak terlalu sedikit dalam video)"
                 continue
             if catatan:
-                catatan["nota"] = None
+                catatan["nota"] = terang_sama(arah, kk.nama) if stor.status.get(nama, {}).get("arah") == arah else None
             kuat = mx >= a.ambang_maklum + 0.1 or (n >= 3 and purata >= a.ambang_maklum)
             if kuat and stor.maklum_hidup(nama):
                 cetus(kk, nama, nama, None, tr["img"], tr["t_kam"], sekarang, arah)  # status + notifikasi
@@ -2144,7 +2151,9 @@ def cmd_pantau(a):
                 while cs and cs[0][0] < sekarang - a.tempoh_sahkan:
                     cs.popleft()
                 yakin = skor >= a.ambang_maklum + 0.1 or (len(cs) >= 2 and np.mean([v for _, v in cs]) >= a.ambang_maklum)
-                if not yakin and stor.status.get(nama, {}).get("arah") != mod_arah:
+                if stor.status.get(nama, {}).get("arah") == mod_arah:
+                    stor.dikesan[nama]["nota"] = terang_sama(mod_arah, kk.nama)
+                elif not yakin:
                     stor.dikesan[nama]["nota"] = f"skor belum cukup ({skor:.2f}; perlu {a.ambang_maklum + 0.1:.2f}) untuk tukar status"
                 if yakin and stor.status.get(nama, {}).get("arah") != mod_arah and stor.beza_kedua(f, nama) >= a.beza_min:
                     stor.kemas_status(nama, mod_arah, kk.nama)
