@@ -427,7 +427,7 @@ function lukisKlip() {
 
 function statusHtml(st) {
   if (!st) return '';
-  return st.arah === 'masuk' ? `<span class="status masuk">🟢 Di rumah sejak ${esc(st.masa)}</span>`
+  return st.arah === 'masuk' ? `<span class="status masuk">🟢 Di rumah · masuk ${esc(st.masa)}</span>`
                              : `<span class="status keluar">⚪ Keluar ${esc(st.masa)}</span>`;
 }
 function terakhirHtml(o) {

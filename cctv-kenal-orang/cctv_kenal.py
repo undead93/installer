@@ -66,7 +66,7 @@ MIRRORS = [
     "https://media.githubusercontent.com/media/opencv/opencv_zoo/main/",
 ]
 IMG_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
-VERSI = "2026.11.07f"  # dipaparkan dalam terminal & page web, untuk sahkan versi yang sedang berjalan
+VERSI = "2026.11.07g"  # dipaparkan dalam terminal & page web, untuk sahkan versi yang sedang berjalan
 DETECT_WIDTH = 1280  # bingkai besar dikecilkan ke lebar ini untuk kesan wajah (640 terlepas wajah <~135px pada 2K)
 NAMA_SAH = re.compile(r"^[\w][\w .'-]{0,39}$")
 
@@ -345,13 +345,6 @@ def lukis_kad_muka(img, peristiwa, sekarang, tempoh=60, maks=4):
             sk = 0.42 * bh / 16
             cv2.putText(img, teks, (x + 3, ty), FON, sk, (255, 255, 255), 1, cv2.LINE_AA)
         y += saiz + 2 * bh + 10
-
-
-def terang_sama(arah, kamera):
-    """Nota bila pergerakan dikira sama dengan status semasa (cth dikira MASUK tetapi sudah di rumah)."""
-    return (f"dikira {arah.upper()} oleh kamera {kamera} – " +
-            ("sudah di rumah" if arah == "masuk" else "sudah keluar") +
-            ", status tidak berubah. Kalau salah, tukar 'Arah kamera ini' kamera itu dalam tab Langsung")
 
 
 def iou(a, b):
@@ -871,6 +864,21 @@ class Stor:
         self.kemas_status(nama, arah, "manual")
         self.tulis_log([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), nama, "", "", "manual", arah])
 
+    def catat_arah(self, nama, arah, kamera, skor=""):
+        """Rekod masuk/keluar: status & masanya sentiasa dikemas kini; baris log (jejak hari ini) ditulis bila
+        arah berubah atau 10 minit sejak rekod terakhir arah yang sama. -> (arah berubah?, dilog?)"""
+        with self.kunci:
+            berubah = self.status.get(nama, {}).get("arah") != arah
+            self.kemas_status(nama, arah, kamera)
+            if not hasattr(self, "_log_arah"):
+                self._log_arah = {}
+            akhir = self._log_arah.get(nama)
+            if berubah or not akhir or akhir[0] != arah or time.time() - akhir[1] > 600:
+                self._log_arah[nama] = (arah, time.time())
+                self.tulis_log([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), nama, skor, "", kamera, arah])
+                return berubah, True
+            return berubah, False
+
     def kemas_status(self, nama, arah, kamera):
         with self.kunci:
             self.status[nama] = {"arah": arah, "masa": time.time(), "kamera": kamera}
@@ -1044,7 +1052,7 @@ class Stor:
         keluar = [n for n in semua if self.status.get(n, {}).get("arah") == "keluar"]
         tiada = [n for n in semua if n not in self.status]
         for n in di_rumah:
-            baris.append(f"🟢 {n} – di rumah sejak {self._masa_mesra(self.status[n]['masa'])}")
+            baris.append(f"🟢 {n} – di rumah (masuk {self._masa_mesra(self.status[n]['masa'])})")
         for n in keluar:
             baris.append(f"⚪ {n} – keluar {self._masa_mesra(self.status[n]['masa'])}")
         for n in tiada:
@@ -1969,14 +1977,13 @@ def cmd_pantau(a):
             baris = ("🆕 Orang baru tidak dikenali" if kid in kk.kad_baru else "⚠️ Orang tidak dikenali") + \
                 {"masuk": " – sedang masuk", "keluar": " – sedang keluar"}.get(arah, "")
         # 1. status siapa di rumah: SENTIASA dikemas kini bila arah berubah (tidak bergantung pada cooldown notifikasi)
-        berubah = nama in kk.arah_baru  # status baru berubah melalui kemas_kini_status() -> tetap maklumkan
+        berubah = nama in kk.arah_baru  # status baru berubah sebelum ini -> tetap maklumkan
         kk.arah_baru.discard(nama)
-        if arah and nama is not None and stor.status.get(nama, {}).get("arah") != arah:
-            stor.kemas_status(nama, arah, kk.nama)
-            berubah = True
-            masa = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            stor.tulis_log([masa, nama, "", "", kk.nama, arah])
-            print(f"{masa}  [{arah.upper()}] {nama}" + (f"  [{kk.nama}]" if banyak else ""))
+        if arah and nama is not None:
+            b2, dilog = stor.catat_arah(nama, arah, kk.nama)
+            berubah = berubah or b2
+            if dilog:
+                print(f"{datetime.now():%Y-%m-%d %H:%M:%S}  [{arah.upper()}] {nama}" + (f"  [{kk.nama}]" if banyak else ""))
         # 2. notifikasi: cooldown mengelak mesej berulang, tetapi perubahan arah (keluar -> masuk) sentiasa dimaklumkan
         km = f"{kunci}:{arah or '-'}"  # masuk & keluar ada cooldown berasingan
         if sekarang - kali_maklum.get(km, 0) < a.cooldown_maklum and not berubah:
@@ -2045,16 +2052,15 @@ def cmd_pantau(a):
                     catatan["nota"] = "arah gerakan tidak jelas (bergerak terlalu sedikit dalam video)"
                 continue
             if catatan:
-                catatan["nota"] = terang_sama(arah, kk.nama) if stor.status.get(nama, {}).get("arah") == arah else None
+                catatan["nota"] = None
+            berubah, dilog = stor.catat_arah(nama, arah, kk.nama, f"{mx:.3f}")
+            if berubah:
+                kk.arah_baru.add(nama)
+            if dilog:
+                print(f"{datetime.now():%Y-%m-%d %H:%M:%S}  [{arah.upper()}] {nama}" + (f"  [{kk.nama}]" if banyak else ""))
             kuat = mx >= a.ambang_maklum + 0.1 or (n >= 3 and purata >= a.ambang_maklum)
             if kuat and stor.maklum_hidup(nama):
-                cetus(kk, nama, nama, None, tr["img"], tr["t_kam"], sekarang, arah)  # status + notifikasi
-            elif stor.status.get(nama, {}).get("arah") != arah:
-                stor.kemas_status(nama, arah, kk.nama)
-                kk.arah_baru.add(nama)
-                masa = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                stor.tulis_log([masa, nama, f"{mx:.3f}", "", kk.nama, arah])
-                print(f"{masa}  [{arah.upper()}] {nama} (status dikemas kini)" + (f"  [{kk.nama}]" if banyak else ""))
+                cetus(kk, nama, nama, None, tr["img"], tr["t_kam"], sekarang, arah)  # notifikasi
 
     def semak_tertunda(kk, sekarang):
         """Kamera 'ikut arah gerakan': putuskan masuk/keluar bila gerakan sudah jelas atau orang itu hilang."""
@@ -2151,16 +2157,15 @@ def cmd_pantau(a):
                 while cs and cs[0][0] < sekarang - a.tempoh_sahkan:
                     cs.popleft()
                 yakin = skor >= a.ambang_maklum + 0.1 or (len(cs) >= 2 and np.mean([v for _, v in cs]) >= a.ambang_maklum)
-                if stor.status.get(nama, {}).get("arah") == mod_arah:
-                    stor.dikesan[nama]["nota"] = terang_sama(mod_arah, kk.nama)
+                if yakin and stor.beza_kedua(f, nama) >= a.beza_min:
+                    berubah, dilog = stor.catat_arah(nama, mod_arah, kk.nama, f"{skor:.3f}")
+                    stor.dikesan[nama]["nota"] = None
+                    if berubah:
+                        kk.arah_baru.add(nama)
+                    if dilog:
+                        print(f"{datetime.now():%Y-%m-%d %H:%M:%S}  [{mod_arah.upper()}] {nama}" + (f"  [{kk.nama}]" if banyak else ""))
                 elif not yakin:
-                    stor.dikesan[nama]["nota"] = f"skor belum cukup ({skor:.2f}; perlu {a.ambang_maklum + 0.1:.2f}) untuk tukar status"
-                if yakin and stor.status.get(nama, {}).get("arah") != mod_arah and stor.beza_kedua(f, nama) >= a.beza_min:
-                    stor.kemas_status(nama, mod_arah, kk.nama)
-                    kk.arah_baru.add(nama)
-                    masa = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    stor.tulis_log([masa, nama, f"{skor:.3f}", "", kk.nama, mod_arah])
-                    print(f"{masa}  [{mod_arah.upper()}] {nama} (status dikemas kini)" + (f"  [{kk.nama}]" if banyak else ""))
+                    stor.dikesan[nama]["nota"] = f"skor belum cukup ({skor:.2f}; perlu {a.ambang_maklum + 0.1:.2f}) untuk kemas kini status"
 
             # --- sejarah saiz wajah (untuk arah gerakan: makin besar = berjalan ke arah kamera)
             ss = kk.sejarah.setdefault(kunci, deque(maxlen=80))
