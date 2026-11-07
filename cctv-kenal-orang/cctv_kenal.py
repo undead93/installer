@@ -66,7 +66,7 @@ MIRRORS = [
     "https://media.githubusercontent.com/media/opencv/opencv_zoo/main/",
 ]
 IMG_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
-VERSI = "2026.11.07d"  # dipaparkan dalam terminal & page web, untuk sahkan versi yang sedang berjalan
+VERSI = "2026.11.07e"  # dipaparkan dalam terminal & page web, untuk sahkan versi yang sedang berjalan
 DETECT_WIDTH = 1280  # bingkai besar dikecilkan ke lebar ini untuk kesan wajah (640 terlepas wajah <~135px pada 2K)
 NAMA_SAH = re.compile(r"^[\w][\w .'-]{0,39}$")
 
@@ -949,7 +949,8 @@ class Stor:
                               "terakhir": {"masa": self._masa_mesra(self.dikesan[d.name]["t"]),
                                            "kamera": self.dikesan[d.name]["kamera"],
                                            "skor": round(self.dikesan[d.name]["skor"], 2),
-                                           "selepas_status": not st or self.dikesan[d.name]["t"] > st["masa"] + 5}
+                                           "selepas_status": not st or self.dikesan[d.name]["t"] > st["masa"] + 5,
+                                           "nota": self.dikesan[d.name].get("nota")}
                               if d.name in self.dikesan else None,
                               "mesej": self.tetapan["mesej"].get(d.name, "")})
         log = rekod[-200:][::-1]
@@ -1820,6 +1821,7 @@ class KonteksKamera:
         self.sejarah = {}      # kunci -> deque[(masa, saiz wajah)]: untuk tahu arah gerakan
         self.calon_status = {}  # nama -> deque[(masa, skor)]: pengecaman untuk kemas kini status di rumah
         self.arah_baru = set()  # nama yang statusnya baru berubah (notifikasi seterusnya abaikan cooldown)
+        self.trek = []          # jejak wajah dari bingkai ke bingkai (kamera ikut gerakan)
         self.tertunda = {}     # kunci -> notifikasi yang menunggu arah gerakan jelas
 
 
@@ -1994,6 +1996,59 @@ def cmd_pantau(a):
         k.label.append(nama or "TIDAK-DIKENALI")
         k.asing |= nama is None
 
+    def kemas_trek(kk, x, y, w, h, nama, skor, img, sekarang):
+        """Sambung wajah ini ke jejak sedia ada (kedudukan berhampiran) atau mulakan jejak baru."""
+        cx, cy = x + w / 2, y + h / 2
+        tr = None
+        for t in kk.trek:
+            bx, by, bw, bh = t["kotak"]
+            if (sekarang - t["t"] < 1.5 and abs(cx - (bx + bw / 2)) < 2.5 * max(w, bw)
+                    and abs(cy - (by + bh / 2)) < 2.5 * max(h, bh)):
+                tr = t
+                break
+        if tr is None:
+            tr = {"titik": [], "skor": {}, "img": img, "t_kam": kk.kam.masa, "terbaik": -1.0}
+            kk.trek.append(tr)
+        tr["kotak"], tr["t"] = (x, y, w, h), sekarang
+        tr["titik"].append((sekarang, float(max(w, h)), cx / img.shape[1]))
+        if nama is not None:
+            tr["skor"].setdefault(nama, []).append(skor)
+            if skor > tr["terbaik"]:
+                tr["terbaik"], tr["img"] = skor, img
+
+    def semak_trek(kk, sekarang):
+        """Bila jejak wajah tamat (hilang 1.5 saat): siapa (bingkai paling yakin) & arah (seluruh jejak)."""
+        mod = stor.arah_untuk(kk.nama)
+        for tr in list(kk.trek):
+            if sekarang - tr["t"] < 1.5:
+                continue
+            kk.trek.remove(tr)
+            if mod not in MOD_GERAK or not tr["skor"]:
+                continue
+            nama, sk = max(tr["skor"].items(), key=lambda kv: max(kv[1]))
+            mx, n, purata = max(sk), len(sk), float(np.mean(sk))
+            catatan = stor.dikesan.get(nama)
+            if not (mx >= a.ambang_maklum or (n >= 2 and purata >= a.ambang)):
+                if catatan:
+                    catatan["nota"] = f"skor terlalu rendah ({mx:.2f}) untuk pasti siapa"
+                continue
+            arah = arah_gerakan(tr["titik"], mod)
+            if arah is None:
+                if catatan:
+                    catatan["nota"] = "arah gerakan tidak jelas (bergerak terlalu sedikit dalam video)"
+                continue
+            if catatan:
+                catatan["nota"] = None
+            kuat = mx >= a.ambang_maklum + 0.1 or (n >= 3 and purata >= a.ambang_maklum)
+            if kuat and stor.maklum_hidup(nama):
+                cetus(kk, nama, nama, None, tr["img"], tr["t_kam"], sekarang, arah)  # status + notifikasi
+            elif stor.status.get(nama, {}).get("arah") != arah:
+                stor.kemas_status(nama, arah, kk.nama)
+                kk.arah_baru.add(nama)
+                masa = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                stor.tulis_log([masa, nama, f"{mx:.3f}", "", kk.nama, arah])
+                print(f"{masa}  [{arah.upper()}] {nama} (status dikemas kini)" + (f"  [{kk.nama}]" if banyak else ""))
+
     def semak_tertunda(kk, sekarang):
         """Kamera 'ikut arah gerakan': putuskan masuk/keluar bila gerakan sudah jelas atau orang itu hilang."""
         mod = stor.arah_untuk(kk.nama)
@@ -2011,6 +2066,7 @@ def cmd_pantau(a):
         sekarang = time.time()
         kotak = []
         semak_tertunda(kk, sekarang)
+        semak_trek(kk, sekarang)
         # --- jimat CPU: langkau pengesanan wajah bila tiada gerakan dan tiada wajah baru-baru ini
         kecil = cv2.GaussianBlur(cv2.cvtColor(cv2.resize(img, (320, 180)), cv2.COLOR_BGR2GRAY), (5, 5), 0)
         gerak = kk.kelabu_lepas is None or float((cv2.absdiff(kecil, kk.kelabu_lepas) > 25).mean()) > 0.0005
@@ -2075,15 +2131,21 @@ def cmd_pantau(a):
                     cv2.imwrite(str(TANGKAPAN / f"asing_{datetime.now():%Y%m%d_%H%M%S}_{slug(kk.nama)}.jpg"), img)
 
             # --- status di rumah (syarat lebih ringan dari notifikasi): kamera MASUK/KELUAR yang kenal ahli keluarga
-            if nama is not None:
-                stor.dikesan[nama] = {"t": sekarang, "kamera": kk.nama, "skor": skor}
             mod_arah = stor.arah_untuk(kk.nama)
+            kemas_trek(kk, x, y, w, h, nama, skor, img, sekarang)
+            if nama is not None:
+                lama = stor.dikesan.get(nama, {})
+                stor.dikesan[nama] = {"t": sekarang, "kamera": kk.nama, "skor": skor,
+                                      "nota": "kamera ini belum ditetapkan arah (tab Langsung)" if mod_arah == "tiada"
+                                      else lama.get("nota") if lama.get("kamera") == kk.nama else None}
             if nama is not None and mod_arah in ("masuk", "keluar"):
                 cs = kk.calon_status.setdefault(nama, deque())
                 cs.append((sekarang, skor))
                 while cs and cs[0][0] < sekarang - a.tempoh_sahkan:
                     cs.popleft()
                 yakin = skor >= a.ambang_maklum + 0.1 or (len(cs) >= 2 and np.mean([v for _, v in cs]) >= a.ambang_maklum)
+                if not yakin and stor.status.get(nama, {}).get("arah") != mod_arah:
+                    stor.dikesan[nama]["nota"] = f"skor belum cukup ({skor:.2f}; perlu {a.ambang_maklum + 0.1:.2f}) untuk tukar status"
                 if yakin and stor.status.get(nama, {}).get("arah") != mod_arah and stor.beza_kedua(f, nama) >= a.beza_min:
                     stor.kemas_status(nama, mod_arah, kk.nama)
                     kk.arah_baru.add(nama)
@@ -2132,7 +2194,8 @@ def cmd_pantau(a):
             sej.clear()
             mod = stor.arah_untuk(kk.nama)
             if mod in MOD_GERAK:
-                if kunci not in kk.tertunda:  # tunggu arah gerakan jelas sebelum hantar
+                # ahli keluarga: diuruskan oleh jejak wajah (semak_trek); orang asing: tunggu arah gerakan jelas
+                if nama is None and kunci not in kk.tertunda:
                     kk.tertunda[kunci] = {"nama": nama, "kid": kid, "img": img, "t": sekarang, "t_kam": kam.masa}
                 continue
             cetus(kk, kunci, nama, kid, img, kam.masa, sekarang, mod if mod in ("masuk", "keluar") else None)
@@ -2177,6 +2240,7 @@ def cmd_pantau(a):
         if all(kk.kam.fail_video for kk in kamera):
             for kk in kamera:
                 semak_tertunda(kk, time.time() + 10)  # putuskan arah yang masih menunggu
+                semak_trek(kk, time.time() + 10)
             for kk in kamera:
                 kk.kam.tutup()  # siapkan klip yang masih dirakam
             for th in threads_klip:

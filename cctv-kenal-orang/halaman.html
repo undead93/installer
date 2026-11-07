@@ -432,12 +432,8 @@ function statusHtml(st) {
 }
 function terakhirHtml(o) {
   const t = o.terakhir; if (!t || !t.selepas_status) return '';
-  const modKam = (data.arah || {})[t.kamera];
-  const patut = modKam === 'masuk' || modKam === 'keluar' ? modKam : null;
-  const lemah = patut && (!o.status || o.status.arah !== patut);
   return `<div class="masa-rumah">👀 Terakhir dikesan: ${esc(t.kamera)} ${esc(t.masa)} (skor ${t.skor})` +
-    (lemah ? ` – <span style="color:#f59e0b">skor belum cukup untuk tukar status ke ${patut === 'masuk' ? 'di rumah' : 'keluar'}.
-      Namakan kad wajah orang ini dari kamera ${esc(t.kamera)} dalam tab Wajah baru.</span>` : '') + '</div>';
+    (t.nota ? ` – <span style="color:#f59e0b">${esc(t.nota)}</span>` : '') + '</div>';
 }
 function lukisRumah() {
   const ol = data.orang || [];
