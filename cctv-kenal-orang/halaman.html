@@ -213,7 +213,13 @@
   <section id="t-log" hidden>
     <h2>Klip video</h2>
     <div class="klip-grid" id="senarai-klip"></div>
-    <h2>Log hari ini</h2>
+    <h2 id="tajuk-log">Log hari ini</h2>
+    <div class="baris" style="margin:0 0 10px">
+      <button class="btn" id="log-sebelum" aria-label="Hari sebelum">◀</button>
+      <input type="date" id="tarikh-log" style="flex:1 1 160px;padding:9px 10px;font:inherit;color:var(--teks);background:var(--bg);border:1px solid var(--garis);border-radius:8px">
+      <button class="btn" id="log-selepas" aria-label="Hari selepas">▶</button>
+      <button class="btn" id="log-hari-ini">Hari ini</button>
+    </div>
     <div class="kad"><table><thead><tr><th>Masa</th><th>Nama</th><th>Skor</th><th id="th-kamera" hidden>Kamera</th></tr></thead>
       <tbody id="isi-log"></tbody></table></div>
   </section>
@@ -478,15 +484,48 @@ $('#senarai-rumah').addEventListener('click', async e => {
         toast(b.dataset.status === 'masuk' ? `${nama} ditanda di rumah` : `${nama} ditanda keluar`); muat(true); }
   catch (err) { toast(err.message); }
 });
+let tarikhLog = null, logTarikh = null;  // null = hari ini (ikut data biasa)
+function namaHari(t) {
+  const d = new Date(t + 'T00:00:00');
+  return ['Ahad', 'Isnin', 'Selasa', 'Rabu', 'Khamis', 'Jumaat', 'Sabtu'][d.getDay()] + ', ' +
+         d.toLocaleDateString('ms-MY', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+async function pilihTarikhLog(t) {
+  const hari = data.hari_ini;
+  tarikhLog = !t || t >= hari ? null : t;
+  logTarikh = null;
+  if (tarikhLog) {
+    try { logTarikh = (await (await fetch('/api/log?tarikh=' + tarikhLog)).json()).log || []; }
+    catch (e) { toast('Tak dapat baca log'); }
+  }
+  lukisLog();
+}
+$('#tarikh-log').addEventListener('change', e => pilihTarikhLog(e.target.value));
+$('#log-hari-ini').onclick = () => pilihTarikhLog(null);
+function anjakHari(n) {
+  const d = new Date((tarikhLog || data.hari_ini) + 'T00:00:00'); d.setDate(d.getDate() + n);
+  const p2 = x => String(x).padStart(2, '0');  // tarikh tempatan (bukan UTC)
+  pilihTarikhLog(`${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`);
+}
+$('#log-sebelum').onclick = () => anjakHari(-1);
+$('#log-selepas').onclick = () => anjakHari(1);
+
 function lukisLog() {
   lukisKlip();
   const banyak = (data.kamera || []).length > 1;
   $('#th-kamera').hidden = !banyak;
-  $('#isi-log').innerHTML = data.log.length
-    ? data.log.map(r => `<tr><td>${esc(r[0].slice(11))}</td>
+  const rekod = tarikhLog ? (logTarikh || []) : data.log;
+  const el = $('#tarikh-log');
+  if (data.hari_ini) { el.max = data.hari_ini; if (document.activeElement !== el) el.value = tarikhLog || data.hari_ini; }
+  const senarai = data.tarikh_log || [];
+  if (senarai.length) el.min = senarai[senarai.length - 1];
+  $('#log-selepas').disabled = !tarikhLog;
+  $('#tajuk-log').textContent = tarikhLog ? 'Log ' + namaHari(tarikhLog) : 'Log hari ini';
+  $('#isi-log').innerHTML = rekod.length
+    ? rekod.map(r => `<tr><td>${esc(r[0].slice(11))}</td>
         <td class="${r[1] === 'TIDAK DIKENALI' ? 'asing' : ''}">${esc(r[1])}${r[3] ? ' #' + esc(r[3].slice(-4)) : ''}</td>
         <td>${r[5] ? (r[5] === 'masuk' ? '🟢 MASUK' : '⚪ KELUAR') : esc(r[2])}</td>${banyak ? `<td>${esc(r[4] || '')}</td>` : ''}</tr>`).join('')
-    : `<tr><td colspan="4" class="pudar">Belum ada rekod hari ini.</td></tr>`;
+    : `<tr><td colspan="4" class="pudar">${tarikhLog ? 'Tiada rekod pada tarikh ini.' : 'Belum ada rekod hari ini.'}</td></tr>`;
   lukisPilihKamera();
 }
 

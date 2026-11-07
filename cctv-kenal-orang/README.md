@@ -41,7 +41,7 @@ Buka alamat itu dari telefon atau komputer yang guna **WiFi yang sama**.
 | **🏠 Di rumah** | Tab pertama. Ringkasan siapa di rumah dan siapa keluar, kad setiap ahli keluarga dengan status dan pergerakan hari ini, dan butang **Tandakan di rumah / keluar** untuk betulkan status kalau kamera terlepas. |
 | **Wajah baru** | Kad untuk setiap orang yang belum dikenali. Taip nama dan tekan Simpan. Ketik gambar yang salah orang supaya ia tidak disimpan. Butang "Mungkin Ali?" muncul jika wajah itu mirip orang yang sudah berdaftar. Kalau orang yang sama ada dalam beberapa kad, tanda **Pilih** pada kad-kad itu dan tekan **Gabungkan**. |
 | **Orang berdaftar** | Senarai orang dan gambar mereka. Anda boleh tambah orang baru dengan memuat naik gambar dari telefon, padam gambar yang salah, atau padam orang. |
-| **Log & video** | Klip video setiap notifikasi, dan senarai siapa dikesan hari ini. |
+| **Log & video** | Klip video setiap notifikasi (24 jam terakhir), dan log siapa dikesan. Guna pemilih tarikh atau ◀ ▶ untuk melihat log hari lain. |
 | **Langsung** | Video kamera dengan tag nama pada wajah, **kad muka** (gambar, nama, masa) di penjuru kanan, dan **zon pengesanan**. Tekan *Lukis zon pengesanan* dan seret jari di atas video: hanya wajah dalam zon diproses (contohnya untuk abaikan jalan raya atau TV). |
 
 Untuk letak kata laluan pada page web:
@@ -161,8 +161,8 @@ URL RTSP jenama lain:
 | `orang/<nama>/` | Gambar orang berdaftar. Anda juga boleh letak gambar di sini secara manual, kemudian jalankan `python3 cctv_kenal.py daftar`. |
 | `wajah_baru/` | Wajah orang tidak dikenali yang belum dinamakan. Dipadam sendiri selepas 14 hari (`--simpan-hari`). |
 | `log/YYYY-MM-DD.csv` | Rekod masa, nama, skor, kamera dan MASUK/KELUAR. Satu fail baru untuk setiap hari, walaupun sistem tidak ditutup. Boleh dibuka dalam Excel. |
-| `klip/` | Klip video yang dihantar bersama notifikasi. Dipadam sendiri selepas 14 hari. |
-| `tangkapan/` | Gambar penuh semasa orang tidak dikenali dikesan. |
+| `klip/` | Klip video yang dihantar bersama notifikasi. Dipadam sendiri selepas **24 jam** (`--simpan-klip-jam`). |
+| `tangkapan/` | Gambar penuh semasa orang tidak dikenali dikesan. Dipadam selepas 24 jam (`--simpan-klip-jam`). |
 
 ## Notifikasi WhatsApp (Baileys)
 

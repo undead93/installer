@@ -66,7 +66,7 @@ MIRRORS = [
     "https://media.githubusercontent.com/media/opencv/opencv_zoo/main/",
 ]
 IMG_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
-VERSI = "2026.11.07h"  # dipaparkan dalam terminal & page web, untuk sahkan versi yang sedang berjalan
+VERSI = "2026.11.07i"  # dipaparkan dalam terminal & page web, untuk sahkan versi yang sedang berjalan
 DETECT_WIDTH = 1280  # bingkai besar dikecilkan ke lebar ini untuk kesan wajah (640 terlepas wajah <~135px pada 2K)
 NAMA_SAH = re.compile(r"^[\w][\w .'-]{0,39}$")
 
@@ -666,9 +666,10 @@ class Stor:
         s = 640 / max(crop.shape[:2])  # simpan sehingga 640px (tidak dibesarkan jika lebih kecil)
         return cv2.resize(crop, None, fx=s, fy=s) if s < 1 else crop
 
-    def bersih(self, hari):
-        """Padam kad wajah baru yang tidak dinamakan, klip video dan gambar tangkapan yang lebih lama dari `hari`."""
+    def bersih(self, hari, klip_jam=24):
+        """Padam kad wajah baru tidak dinamakan (> `hari`), dan klip video & gambar tangkapan (> `klip_jam` jam)."""
         had = time.time() - hari * 86400
+        had_klip = time.time() - klip_jam * 3600
         with self.kunci:
             for kid in [k for k, v in self.kumpulan.items() if v["akhir_lihat"] < had]:
                 self.buang_kumpulan(kid)
@@ -678,7 +679,7 @@ class Stor:
                 continue
             for f in folder.glob(corak):
                 try:
-                    if f.stat().st_mtime < had:
+                    if f.stat().st_mtime < had_klip:
                         f.unlink()
                 except OSError:  # sedang dimainkan dalam page web (Windows) - cuba lagi nanti
                     pass
@@ -987,6 +988,8 @@ class Stor:
                 "zon": dict(self.tetapan["zon"]),
                 "https": getattr(self, "port_https", None),
                 "versi": VERSI,
+                "tarikh_log": self.tarikh_log()[:120],
+                "hari_ini": datetime.now().strftime("%Y-%m-%d"),
                 "arah": dict(self.tetapan["arah"]),
                 "saluran": self.notif.nama if self.notif else [],
                 "whatsapp": self.notif.whatsapp.status()
@@ -1065,12 +1068,28 @@ class Stor:
             baris.append("\n_Tetapkan 'Arah kamera' dalam page web supaya masuk/keluar direkod._")
         return "\n".join(baris)
 
-    def teks_log(self):
-        baris = [f"📋 *Log hari ini* ({datetime.now():%d/%m})"]
-        rekod = []
-        if self.log_path and self.log_path.exists():
-            with open(self.log_path, newline="", encoding="utf-8") as fh:
-                rekod = list(csv.reader(fh))[1:]
+    @staticmethod
+    def baca_log(tarikh):
+        """Baris log bagi satu tarikh (datetime.date atau 'YYYY-MM-DD'), tanpa tajuk."""
+        f = LOG_DIR / f"{tarikh}.csv"
+        if not f.exists():
+            return []
+        with open(f, newline="", encoding="utf-8") as fh:
+            return list(csv.reader(fh))[1:]
+
+    @staticmethod
+    def tarikh_log():
+        return sorted((f.stem for f in LOG_DIR.glob("*.csv") if re.fullmatch(r"\d{4}-\d{2}-\d{2}", f.stem)),
+                      reverse=True) if LOG_DIR.is_dir() else []
+
+    def teks_log(self, tarikh=None):
+        from datetime import date
+        tarikh = tarikh or date.today()
+        tajuk = "hari ini" if tarikh == date.today() else f"{tarikh:%A}".replace("Monday", "Isnin").replace(
+            "Tuesday", "Selasa").replace("Wednesday", "Rabu").replace("Thursday", "Khamis").replace(
+            "Friday", "Jumaat").replace("Saturday", "Sabtu").replace("Sunday", "Ahad")
+        baris = [f"📋 *Log {tajuk}* ({tarikh:%d/%m/%Y})"]
+        rekod = self.baca_log(tarikh)
         arah = [r for r in rekod if len(r) > 5 and r[5] in ("masuk", "keluar")]
         for r in arah[-25:]:
             ikon, kata = ("🟢", "masuk") if r[5] == "masuk" else ("⚪", "keluar")
@@ -1081,11 +1100,11 @@ class Stor:
                 n = r[1]
                 dikesan[n] = (dikesan.get(n, (0, ""))[0] + 1, r[0][11:16])
         if dikesan:
-            baris.append("\n👀 *Dikesan hari ini:*")
+            baris.append("\n👀 *Dikesan" + (" hari ini" if tajuk == "hari ini" else "") + ":*")
             for n, (bil, akhir) in sorted(dikesan.items(), key=lambda kv: kv[1][1], reverse=True)[:15]:
                 baris.append(f"• {n} – {bil}x, terakhir {akhir}")
         if len(baris) == 1:
-            baris.append("Belum ada rekod hari ini.")
+            baris.append("Tiada rekod pada tarikh ini.")
         return "\n".join(baris)
 
     def jawab_wa(self, d):
@@ -1097,7 +1116,18 @@ class Stor:
         if re.match(r"^(siapa|siapa di ?rumah|siapa ada|status|rumah)\b", t):
             return [{"teks": self.teks_siapa()}]
         if re.match(r"^(log|rekod|sejarah)\b", t):
-            return [{"teks": self.teks_log()}]
+            from datetime import date, timedelta
+            tarikh = date.today()
+            if "semalam" in t:
+                tarikh -= timedelta(days=1)
+            m = re.search(r"(\d{1,2})[/.-](\d{1,2})(?:[/.-](\d{2,4}))?", t)
+            if m:
+                th = int(m[3]) if m[3] else tarikh.year
+                try:
+                    tarikh = date(th + 2000 if th < 100 else th, int(m[2]), int(m[1]))
+                except ValueError:
+                    return [{"teks": "Tarikh tidak sah. Contoh: *log 05/11* atau *log semalam*"}]
+            return [{"teks": self.teks_log(tarikh)}]
         if re.match(r"^(gambar|foto|snap|tengok|lihat|kamera|cctv)\b", t):
             balas = []
             for nama in self.kamera:
@@ -1113,6 +1143,7 @@ class Stor:
             return [{"teks": "🤖 *CCTV Kenal Orang* – arahan:\n"
                              "• *siapa* – siapa di rumah sekarang\n"
                              "• *log* – masuk/keluar & siapa dikesan hari ini\n"
+                             "• *log semalam* / *log 05/11* – log tarikh lain\n"
                              f"• *gambar* – gambar terkini semua kamera ({kam})\n"
                              "• *gambar <nama kamera>* – gambar satu kamera\n"
                              "• *menu* – senarai ini"}]
@@ -1240,6 +1271,11 @@ def mula_web(stor, port, kata_laluan, port_https=0):
                     self._strim(k)
                 elif path.startswith("/klip/"):
                     self._klip(urllib.parse.unquote(path[len("/klip/"):]))
+                elif path == "/api/log":
+                    t = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("tarikh", [""])[0]
+                    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", t):
+                        raise ValueError("Tarikh tidak sah.")
+                    self._json({"tarikh": t, "log": stor.baca_log(t)[-1000:][::-1]})
                 else:
                     self._hantar(404, "text/plain", b"tiada")
             except ValueError as e:
@@ -1869,7 +1905,7 @@ def cmd_pantau(a):
           f"beza dengan orang lain >= {a.beza_min}, separuh wajah jelas (>= {a.saiz_min_maklum}px, menghadap)")
     print(f"Had skor: kenal {a.ambang} | notifikasi {a.ambang_maklum} | kumpul wajah baru {a.ambang_kumpul}")
     stor = Stor(enjin, a.ambang, a.ambang_kumpul, a.maks_gambar, a.selang_simpan, a.saiz_min)
-    stor.bersih(a.simpan_hari)
+    stor.bersih(a.simpan_hari, a.simpan_klip_jam)
     print(f"CCTV Kenal Orang versi {VERSI}")
     print(f"Orang berdaftar: {len(set(stor.nama))} ({', '.join(sorted(set(stor.nama))) or '-'})")
     print(f"Kumpulan wajah belum dinamakan: {len(stor.kumpulan)}")
@@ -2237,7 +2273,7 @@ def cmd_pantau(a):
             if not aktif:
                 break
             if time.time() - t_bersih > 3600:
-                stor.bersih(a.simpan_hari)
+                stor.bersih(a.simpan_hari, a.simpan_klip_jam)
                 t_bersih = time.time()
             diproses = False
             for kk in aktif:  # setiap kamera diproses bergilir, maks --fps bingkai sesaat setiap satu
@@ -2317,8 +2353,10 @@ def main():
                         "1280 untuk sface (~65px). Naikkan untuk wajah lebih jauh (lebih CPU)")
     m.add_argument("--tanpa-gerakan", action="store_true",
                    help="proses setiap bingkai walaupun tiada gerakan (lebih CPU)")
-    m.add_argument("--simpan-hari", type=float, default=14,  # kad wajah baru, klip video & tangkapan
-                   help="padam wajah baru yang tidak dinamakan selepas N hari. Default 14")
+    m.add_argument("--simpan-hari", type=float, default=14,
+                   help="padam kad wajah baru yang tidak dinamakan selepas N hari. Default 14")
+    m.add_argument("--simpan-klip-jam", type=float, default=24,
+                   help="padam klip video & gambar tangkapan selepas N jam. Default 24")
     m.add_argument("--papar", action="store_true", help="tunjuk tetingkap video")
     m.add_argument("--rakam", help="simpan video berlabel ke fail .mp4")
     m.add_argument("--cooldown-maklum", type=float, default=600,
