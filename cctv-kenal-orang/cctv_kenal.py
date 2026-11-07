@@ -66,7 +66,7 @@ MIRRORS = [
     "https://media.githubusercontent.com/media/opencv/opencv_zoo/main/",
 ]
 IMG_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
-VERSI = "2026.11.07g"  # dipaparkan dalam terminal & page web, untuk sahkan versi yang sedang berjalan
+VERSI = "2026.11.07h"  # dipaparkan dalam terminal & page web, untuk sahkan versi yang sedang berjalan
 DETECT_WIDTH = 1280  # bingkai besar dikecilkan ke lebar ini untuk kesan wajah (640 terlepas wajah <~135px pada 2K)
 NAMA_SAH = re.compile(r"^[\w][\w .'-]{0,39}$")
 
@@ -667,14 +667,16 @@ class Stor:
         return cv2.resize(crop, None, fx=s, fy=s) if s < 1 else crop
 
     def bersih(self, hari):
-        """Padam kumpulan wajah baru yang tidak dinamakan selepas beberapa hari."""
+        """Padam kad wajah baru yang tidak dinamakan, klip video dan gambar tangkapan yang lebih lama dari `hari`."""
         had = time.time() - hari * 86400
         with self.kunci:
             for kid in [k for k, v in self.kumpulan.items() if v["akhir_lihat"] < had]:
                 self.buang_kumpulan(kid)
             self.gabung_semua()
-        if KLIP_DIR.is_dir():
-            for f in KLIP_DIR.glob("*.mp4"):
+        for folder, corak in ((KLIP_DIR, "*.mp4"), (TANGKAPAN, "*.jpg")):
+            if not folder.is_dir():
+                continue
+            for f in folder.glob(corak):
                 try:
                     if f.stat().st_mtime < had:
                         f.unlink()
@@ -2315,7 +2317,7 @@ def main():
                         "1280 untuk sface (~65px). Naikkan untuk wajah lebih jauh (lebih CPU)")
     m.add_argument("--tanpa-gerakan", action="store_true",
                    help="proses setiap bingkai walaupun tiada gerakan (lebih CPU)")
-    m.add_argument("--simpan-hari", type=float, default=14,
+    m.add_argument("--simpan-hari", type=float, default=14,  # kad wajah baru, klip video & tangkapan
                    help="padam wajah baru yang tidak dinamakan selepas N hari. Default 14")
     m.add_argument("--papar", action="store_true", help="tunjuk tetingkap video")
     m.add_argument("--rakam", help="simpan video berlabel ke fail .mp4")
