@@ -66,7 +66,7 @@ MIRRORS = [
     "https://media.githubusercontent.com/media/opencv/opencv_zoo/main/",
 ]
 IMG_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
-VERSI = "2026.11.07c"  # dipaparkan dalam terminal & page web, untuk sahkan versi yang sedang berjalan
+VERSI = "2026.11.07d"  # dipaparkan dalam terminal & page web, untuk sahkan versi yang sedang berjalan
 DETECT_WIDTH = 1280  # bingkai besar dikecilkan ke lebar ini untuk kesan wajah (640 terlepas wajah <~135px pada 2K)
 NAMA_SAH = re.compile(r"^[\w][\w .'-]{0,39}$")
 
@@ -401,6 +401,7 @@ class Stor:
         except (OSError, ValueError):
             self.status = {}
         self.peristiwa = {}                    # nama kamera -> deque kad muka terkini untuk paparan langsung
+        self.dikesan = {}                      # nama -> pengecaman terakhir {t, kamera, skor} (untuk tab Di rumah)
         ORANG.mkdir(exist_ok=True)
         WAJAH_BARU.mkdir(exist_ok=True)
         self.muat_orang()
@@ -945,6 +946,11 @@ class Stor:
                                          "masa_mesra": self._masa_mesra(st["masa"])}
                               if st else None,
                               "hari_ini": gerak.get(d.name, []),
+                              "terakhir": {"masa": self._masa_mesra(self.dikesan[d.name]["t"]),
+                                           "kamera": self.dikesan[d.name]["kamera"],
+                                           "skor": round(self.dikesan[d.name]["skor"], 2),
+                                           "selepas_status": not st or self.dikesan[d.name]["t"] > st["masa"] + 5}
+                              if d.name in self.dikesan else None,
                               "mesej": self.tetapan["mesej"].get(d.name, "")})
         log = rekod[-200:][::-1]
         klip = []
@@ -2069,6 +2075,8 @@ def cmd_pantau(a):
                     cv2.imwrite(str(TANGKAPAN / f"asing_{datetime.now():%Y%m%d_%H%M%S}_{slug(kk.nama)}.jpg"), img)
 
             # --- status di rumah (syarat lebih ringan dari notifikasi): kamera MASUK/KELUAR yang kenal ahli keluarga
+            if nama is not None:
+                stor.dikesan[nama] = {"t": sekarang, "kamera": kk.nama, "skor": skor}
             mod_arah = stor.arah_untuk(kk.nama)
             if nama is not None and mod_arah in ("masuk", "keluar"):
                 cs = kk.calon_status.setdefault(nama, deque())

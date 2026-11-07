@@ -430,6 +430,15 @@ function statusHtml(st) {
   return st.arah === 'masuk' ? `<span class="status masuk">🟢 Di rumah sejak ${esc(st.masa)}</span>`
                              : `<span class="status keluar">⚪ Keluar ${esc(st.masa)}</span>`;
 }
+function terakhirHtml(o) {
+  const t = o.terakhir; if (!t || !t.selepas_status) return '';
+  const modKam = (data.arah || {})[t.kamera];
+  const patut = modKam === 'masuk' || modKam === 'keluar' ? modKam : null;
+  const lemah = patut && (!o.status || o.status.arah !== patut);
+  return `<div class="masa-rumah">👀 Terakhir dikesan: ${esc(t.kamera)} ${esc(t.masa)} (skor ${t.skor})` +
+    (lemah ? ` – <span style="color:#f59e0b">skor belum cukup untuk tukar status ke ${patut === 'masuk' ? 'di rumah' : 'keluar'}.
+      Namakan kad wajah orang ini dari kamera ${esc(t.kamera)} dalam tab Wajah baru.</span>` : '') + '</div>';
+}
 function lukisRumah() {
   const ol = data.orang || [];
   const dalam = ol.filter(o => o.status && o.status.arah === 'masuk');
@@ -449,6 +458,7 @@ function lukisRumah() {
           <div>${st ? statusHtml({ arah, masa: st.masa_mesra }).replace('class="status', 'style="margin:0" class="status')
                     : '<span class="status keluar" style="margin:0">❔ Tiada rekod</span>'}</div>
           <div class="masa-rumah">${st ? (arah === 'masuk' ? 'Masuk' : 'Keluar') + ' ' + esc(st.masa) + lokasi : 'Belum dikesan masuk atau keluar'}</div>
+          ${terakhirHtml(o)}
         </div>
       </div>
       ${o.hari_ini && o.hari_ini.length ? `<div class="jejak">${o.hari_ini.map(g =>
