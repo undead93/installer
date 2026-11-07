@@ -91,9 +91,20 @@
   .status { font-size: 13px; padding: 2px 8px; border-radius: 10px; margin-left: 6px; white-space: nowrap; }
   .status.masuk { background: rgba(22,163,74,.15); color: var(--ok); }
   .status.keluar { background: var(--garis); color: var(--pudar); }
-  .dirumah { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
-  .dirumah .kad { margin: 0; padding: 10px 12px; display: flex; align-items: center; gap: 10px; min-width: 150px; }
-  .dirumah img { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; }
+  .ringkasan { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+  .ringkasan .angka { flex: 1 1 120px; background: var(--kad); border: 1px solid var(--garis); border-radius: 12px; padding: 12px 14px; }
+  .ringkasan .angka b { display: block; font-size: 28px; line-height: 1.1; }
+  .rumah-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+  .rumah-grid .kad { margin: 0; }
+  .orang-rumah { display: flex; align-items: center; gap: 14px; }
+  .orang-rumah img, .orang-rumah .tiada-gambar { width: 64px; height: 64px; border-radius: 50%; object-fit: cover; flex: none;
+                     border: 3px solid var(--garis); background: var(--garis); }
+  .orang-rumah.masuk img { border-color: var(--ok); }
+  .orang-rumah b { font-size: 18px; }
+  .masa-rumah { color: var(--pudar); font-size: 13px; margin-top: 2px; }
+  .jejak { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+  .jejak span { font-size: 12px; padding: 3px 8px; border-radius: 10px; background: var(--bg); border: 1px solid var(--garis); }
+  .rumah-grid .baris .btn { flex: 1 1 auto; padding: 8px 10px; font-size: 14px; }
   select { padding: 9px 10px; font: inherit; color: var(--teks); background: var(--bg); border: 1px solid var(--garis);
            border-radius: 8px; flex: 1 1 220px; min-width: 0; }
   .pilih { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--pudar); cursor: pointer; }
@@ -137,7 +148,8 @@
   <div class="bar">
     <h1>CCTV Kenal Orang</h1>
     <nav>
-      <button data-tab="baru" class="aktif">Wajah baru<span class="bil" id="bil-baru" hidden></span></button>
+      <button data-tab="rumah" class="aktif">🏠 Di rumah</button>
+      <button data-tab="baru">Wajah baru<span class="bil" id="bil-baru" hidden></span></button>
       <button data-tab="orang">Orang berdaftar</button>
       <button data-tab="log">Log &amp; video</button>
       <button data-tab="langsung">Langsung</button>
@@ -146,7 +158,13 @@
 </header>
 
 <main>
-  <section id="t-baru">
+  <section id="t-rumah">
+    <div class="ringkasan" id="ringkasan-rumah"></div>
+    <div class="rumah-grid" id="senarai-rumah"></div>
+    <p class="bantu" id="nota-rumah"></p>
+  </section>
+
+  <section id="t-baru" hidden>
     <p class="bantu">Setiap kad ialah seorang yang belum dikenali. Taip namanya dan tekan Simpan.
       Ketik gambar yang salah orang supaya ia tidak disimpan.
       Kalau orang yang sama ada dalam beberapa kad, tanda <b>Pilih</b> pada kad-kad itu dan tekan <b>Gabungkan</b>.</p>
@@ -193,8 +211,6 @@
   </section>
 
   <section id="t-log" hidden>
-    <h2>Siapa di rumah</h2>
-    <div class="dirumah" id="dirumah"></div>
     <h2>Klip video</h2>
     <div class="klip-grid" id="senarai-klip"></div>
     <h2>Log hari ini</h2>
@@ -263,7 +279,7 @@
 const $ = s => document.querySelector(s);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let data = { baru: [], orang: [], log: [] };
-let tab = 'baru';
+let tab = 'rumah';
 const keluar = {};  // id kumpulan -> Set nama fail yang dikeluarkan
 
 function toast(msg) {
@@ -313,7 +329,7 @@ function lukis() {
     : 'Belum disetkan. Lihat README untuk sambung WhatsApp.';
   $('#btn-uji').disabled = !(data.saluran && data.saluran.length);
   lukisWA(data.whatsapp);
-  lukisBaru(); lukisOrang(); lukisLog(); lukisZonStatus();
+  lukisRumah(); lukisBaru(); lukisOrang(); lukisLog(); lukisZonStatus();
 }
 
 let qrTerakhir = null;
@@ -411,16 +427,50 @@ function statusHtml(st) {
   return st.arah === 'masuk' ? `<span class="status masuk">🟢 Di rumah sejak ${esc(st.masa)}</span>`
                              : `<span class="status keluar">⚪ Keluar ${esc(st.masa)}</span>`;
 }
-function lukisDiRumah() {
-  const ada = data.orang.filter(o => o.status);
-  $('#dirumah').innerHTML = ada.length
-    ? ada.sort((x, y) => (x.status.arah === 'masuk' ? 0 : 1) - (y.status.arah === 'masuk' ? 0 : 1)).map(o => `<div class="kad">
-        ${o.gambar[0] ? `<img src="${o.gambar[0].url}" alt="">` : ''}
-        <div><b>${esc(o.nama)}</b><div>${statusHtml(o.status).replace('class="status', 'style="margin:0" class="status')}</div></div></div>`).join('')
-    : '<div class="pudar">Belum ada rekod masuk/keluar. Tetapkan <b>Arah kamera</b> dalam tab Langsung.</div>';
+function lukisRumah() {
+  const ol = data.orang || [];
+  const dalam = ol.filter(o => o.status && o.status.arah === 'masuk');
+  const luar = ol.filter(o => o.status && o.status.arah === 'keluar');
+  const tiada = ol.filter(o => !o.status);
+  $('#ringkasan-rumah').innerHTML = ol.length ? `
+    <div class="angka"><b style="color:var(--ok)">${dalam.length}</b>🟢 di rumah</div>
+    <div class="angka"><b>${luar.length}</b>⚪ keluar</div>
+    ${tiada.length ? `<div class="angka"><b>${tiada.length}</b>❔ tiada rekod</div>` : ''}` : '';
+  const kad = o => {
+    const st = o.status, arah = st ? st.arah : '';
+    const lokasi = st ? (st.kamera === 'manual' ? ' (ditanda manual)' : st.kamera ? ` · 📍 ${esc(st.kamera)}` : '') : '';
+    return `<div class="kad" data-nama="${esc(o.nama)}">
+      <div class="orang-rumah ${arah}">
+        ${o.gambar[0] ? `<img src="${o.gambar[0].url}" alt="">` : '<div class="tiada-gambar"></div>'}
+        <div><b>${esc(o.nama)}</b>
+          <div>${st ? statusHtml({ arah, masa: st.masa_mesra }).replace('class="status', 'style="margin:0" class="status')
+                    : '<span class="status keluar" style="margin:0">❔ Tiada rekod</span>'}</div>
+          <div class="masa-rumah">${st ? (arah === 'masuk' ? 'Masuk' : 'Keluar') + ' ' + esc(st.masa) + lokasi : 'Belum dikesan masuk atau keluar'}</div>
+        </div>
+      </div>
+      ${o.hari_ini && o.hari_ini.length ? `<div class="jejak">${o.hari_ini.map(g =>
+          `<span>${g.arah === 'masuk' ? '🟢' : '⚪'} ${esc(g.masa)} ${g.arah}</span>`).join('')}</div>` : ''}
+      <div class="baris">
+        <button class="btn" data-status="masuk" ${arah === 'masuk' ? 'disabled' : ''}>Tandakan di rumah</button>
+        <button class="btn" data-status="keluar" ${arah === 'keluar' ? 'disabled' : ''}>Tandakan keluar</button>
+      </div></div>`;
+  };
+  $('#senarai-rumah').innerHTML = ol.length ? [...dalam, ...luar, ...tiada].map(kad).join('')
+    : '<div class="kosong">Belum ada orang berdaftar. Daftar ahli keluarga dalam tab <b>Orang berdaftar</b>.</div>';
+  const adaArah = Object.keys(data.arah || {}).length;
+  $('#nota-rumah').innerHTML = adaArah
+    ? 'Status dikemas kini bila kamera nampak wajah orang itu masuk atau keluar. Kalau kamera terlepas, tekan <b>Tandakan di rumah</b> / <b>Tandakan keluar</b>.'
+    : '⚠️ Belum ada kamera yang ditetapkan arah MASUK/KELUAR. Tetapkan <b>Arah kamera ini</b> dalam tab <b>Langsung</b> supaya status dikemas kini secara automatik.';
 }
+$('#senarai-rumah').addEventListener('click', async e => {
+  const b = e.target.closest('[data-status]'); if (!b) return;
+  const nama = b.closest('.kad').dataset.nama;
+  try { await post('/api/status', { nama, arah: b.dataset.status });
+        toast(b.dataset.status === 'masuk' ? `${nama} ditanda di rumah` : `${nama} ditanda keluar`); muat(true); }
+  catch (err) { toast(err.message); }
+});
 function lukisLog() {
-  lukisKlip(); lukisDiRumah();
+  lukisKlip();
   const banyak = (data.kamera || []).length > 1;
   $('#th-kamera').hidden = !banyak;
   $('#isi-log').innerHTML = data.log.length

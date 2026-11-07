@@ -825,6 +825,40 @@ class Stor:
                 self.tetapan["arah"][kamera] = arah
             self._simpan_tetapan()
 
+    def tulis_log(self, baris):
+        """Tulis satu baris log ke fail hari ini (fail baru dibuka secara automatik bila tarikh bertukar)."""
+        with self.kunci:
+            laluan = LOG_DIR / f"{datetime.now():%Y-%m-%d}.csv"
+            if getattr(self, "_log_f", None) is None or self.log_path != laluan:
+                if getattr(self, "_log_f", None):
+                    self._log_f.close()
+                LOG_DIR.mkdir(exist_ok=True)
+                baru = not laluan.exists()
+                self._log_f = open(laluan, "a", newline="", encoding="utf-8")
+                self._log = csv.writer(self._log_f)
+                if baru:
+                    self._log.writerow(["masa", "nama", "skor", "kumpulan", "kamera", "arah"])
+                self.log_path = laluan
+            if baris:
+                self._log.writerow(baris)
+            self._log_f.flush()
+
+    def tutup_log(self):
+        with self.kunci:
+            if getattr(self, "_log_f", None):
+                self._log_f.close()
+                self._log_f = None
+
+    def set_status_manual(self, nama, arah):
+        """Betulkan status masuk/keluar secara manual dari page web (cth kamera terlepas)."""
+        nama = self.semak_nama(nama)
+        if arah not in ("masuk", "keluar"):
+            raise ValueError("Status tidak sah.")
+        if not (ORANG / nama).is_dir():
+            raise ValueError(f"{nama} tidak dijumpai.")
+        self.kemas_status(nama, arah, "manual")
+        self.tulis_log([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), nama, "", "", "manual", arah])
+
     def kemas_status(self, nama, arah, kamera):
         with self.kunci:
             self.status[nama] = {"arah": arah, "masa": time.time(), "kamera": kamera}
@@ -880,6 +914,14 @@ class Stor:
                     "akhir": datetime.fromtimestamp(k["akhir_lihat"]).strftime("%d/%m %H:%M"),
                     "cadangan": cad if cad and skor >= self.ambang - 0.08 else None,
                 })
+            rekod = []
+            if self.log_path and self.log_path.exists():
+                with open(self.log_path, newline="", encoding="utf-8") as fh:
+                    rekod = list(csv.reader(fh))[1:]
+            gerak = {}  # nama -> pergerakan masuk/keluar hari ini
+            for r in rekod:
+                if len(r) > 5 and r[5] in ("masuk", "keluar"):
+                    gerak.setdefault(r[1], []).append({"masa": r[0][11:16], "arah": r[5], "kamera": r[4]})
             orang = []
             for d in sorted(p for p in ORANG.iterdir() if p.is_dir()):
                 gambar = []
@@ -895,13 +937,12 @@ class Stor:
                 orang.append({"nama": d.name, "gambar": gambar, "maklum": self.maklum_hidup(d.name),
                               "mesej_keluar": self.tetapan["mesej_keluar"].get(d.name, ""),
                               "status": {"arah": st["arah"], "kamera": st.get("kamera", ""),
-                                         "masa": datetime.fromtimestamp(st["masa"]).strftime("%d/%m %I:%M %p")}
+                                         "masa": datetime.fromtimestamp(st["masa"]).strftime("%d/%m %I:%M %p"),
+                                         "masa_mesra": self._masa_mesra(st["masa"])}
                               if st else None,
+                              "hari_ini": gerak.get(d.name, []),
                               "mesej": self.tetapan["mesej"].get(d.name, "")})
-        log = []
-        if self.log_path and self.log_path.exists():
-            with open(self.log_path, newline="", encoding="utf-8") as fh:
-                log = list(csv.reader(fh))[1:][-200:][::-1]
+        log = rekod[-200:][::-1]
         klip = []
         if KLIP_DIR.is_dir():
             for f in sorted(KLIP_DIR.glob("*.mp4"), reverse=True)[:30]:
@@ -1265,6 +1306,8 @@ def mula_web(stor, port, kata_laluan, port_https=0):
                     stor.padam_orang(d.get("nama"))
                 elif url.path == "/api/maklum":
                     stor.set_maklum(d.get("nama"), bool(d.get("hidup")))
+                elif url.path == "/api/status":
+                    stor.set_status_manual(d.get("nama"), d.get("arah"))
                 elif url.path == "/api/arah":
                     stor.set_arah(d.get("kamera"), d.get("arah"))
                 elif url.path == "/api/zon":
@@ -1798,16 +1841,8 @@ def cmd_pantau(a):
     print(f"Orang berdaftar: {len(set(stor.nama))} ({', '.join(sorted(set(stor.nama))) or '-'})")
     print(f"Kumpulan wajah belum dinamakan: {len(stor.kumpulan)}")
 
-    LOG_DIR.mkdir(exist_ok=True)
     TANGKAPAN.mkdir(exist_ok=True)
-    log_path = LOG_DIR / f"{datetime.now():%Y-%m-%d}.csv"
-    baru = not log_path.exists()
-    log_f = open(log_path, "a", newline="", encoding="utf-8")
-    log = csv.writer(log_f)
-    if baru:
-        log.writerow(["masa", "nama", "skor", "kumpulan", "kamera", "arah"])
-        log_f.flush()
-    stor.log_path = log_path
+    stor.tulis_log(None)  # buka fail log hari ini
 
     pautan = ""
     if a.port:
@@ -1909,8 +1944,7 @@ def cmd_pantau(a):
             if nama is not None:
                 stor.kemas_status(nama, arah, kk.nama)
             masa = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            log.writerow([masa, nama or "TIDAK DIKENALI", "", kid or "", kk.nama, arah])
-            log_f.flush()
+            stor.tulis_log([masa, nama or "TIDAK DIKENALI", "", kid or "", kk.nama, arah])
             print(f"{masa}  [{arah.upper()}] {nama or 'TIDAK DIKENALI'}" + (f"  [{kk.nama}]" if banyak else ""))
         if not guna_video:
             notif.hantar(susun_teks([baris], sekarang, nama is None, kk.nama), img)
@@ -2004,8 +2038,7 @@ def cmd_pantau(a):
                 stor.tambah_peristiwa(kk.nama, label if nama or mungkin else "TIDAK DIKENALI", warna,
                                       potong_segi(asal, face))
                 masa = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                log.writerow([masa, nama or "TIDAK DIKENALI", f"{skor:.3f}", kid or "", kk.nama])
-                log_f.flush()
+                stor.tulis_log([masa, nama or "TIDAK DIKENALI", f"{skor:.3f}", kid or "", kk.nama])
                 print(f"{masa}  {label_log:<22} skor={skor:.2f}" + (f"  [{kk.nama}]" if banyak else ""))
                 if nama is None:
                     cv2.imwrite(str(TANGKAPAN / f"asing_{datetime.now():%Y%m%d_%H%M%S}_{slug(kk.nama)}.jpg"), img)
@@ -2111,10 +2144,10 @@ def cmd_pantau(a):
             kk.kam.tutup()
             if kk.penulis:
                 kk.penulis.release()
-        log_f.close()
+        stor.tutup_log()
         if a.papar:
             cv2.destroyAllWindows()
-        print(f"\nBerhenti. Log: {log_path}")
+        print(f"\nBerhenti. Log: {stor.log_path}")
 
 
 def main():
