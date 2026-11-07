@@ -66,7 +66,7 @@ MIRRORS = [
     "https://media.githubusercontent.com/media/opencv/opencv_zoo/main/",
 ]
 IMG_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
-VERSI = "2026.11.07i"  # dipaparkan dalam terminal & page web, untuk sahkan versi yang sedang berjalan
+VERSI = "2026.11.07j"  # dipaparkan dalam terminal & page web, untuk sahkan versi yang sedang berjalan
 DETECT_WIDTH = 1280  # bingkai besar dikecilkan ke lebar ini untuk kesan wajah (640 terlepas wajah <~135px pada 2K)
 NAMA_SAH = re.compile(r"^[\w][\w .'-]{0,39}$")
 
@@ -1271,6 +1271,15 @@ def mula_web(stor, port, kata_laluan, port_https=0):
                     self._strim(k)
                 elif path.startswith("/klip/"):
                     self._klip(urllib.parse.unquote(path[len("/klip/"):]))
+                elif path == "/api/pergerakan":  # masuk/keluar setiap orang pada satu tarikh
+                    t = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("tarikh", [""])[0]
+                    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", t):
+                        raise ValueError("Tarikh tidak sah.")
+                    gerak = {}
+                    for r in stor.baca_log(t):
+                        if len(r) > 5 and r[5] in ("masuk", "keluar"):
+                            gerak.setdefault(r[1], []).append({"masa": r[0][11:16], "arah": r[5], "kamera": r[4]})
+                    self._json({"tarikh": t, "pergerakan": gerak})
                 elif path == "/api/log":
                     t = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("tarikh", [""])[0]
                     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", t):

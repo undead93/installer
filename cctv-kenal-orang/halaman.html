@@ -160,6 +160,13 @@
 <main>
   <section id="t-rumah">
     <div class="ringkasan" id="ringkasan-rumah"></div>
+    <div class="baris" style="margin:0 0 12px;align-items:center">
+      <b id="tajuk-gerak" style="flex:1 1 100%">Pergerakan hari ini</b>
+      <button class="btn" id="gerak-sebelum" aria-label="Hari sebelum">◀</button>
+      <input type="date" id="tarikh-gerak" style="flex:1 1 160px;padding:9px 10px;font:inherit;color:var(--teks);background:var(--bg);border:1px solid var(--garis);border-radius:8px">
+      <button class="btn" id="gerak-selepas" aria-label="Hari selepas">▶</button>
+      <button class="btn" id="gerak-hari-ini">Hari ini</button>
+    </div>
     <div class="rumah-grid" id="senarai-rumah"></div>
     <p class="bantu" id="nota-rumah"></p>
   </section>
@@ -441,7 +448,37 @@ function terakhirHtml(o) {
   return `<div class="masa-rumah">👀 Terakhir dikesan: ${esc(t.kamera)} ${esc(t.masa)} (skor ${t.skor})` +
     (t.nota ? ` – <span style="color:#f59e0b">${esc(t.nota)}</span>` : '') + '</div>';
 }
+// ---- pilih tarikh untuk jejak pergerakan (tab Di rumah)
+let tarikhGerak = null, gerakTarikh = null;  // null = hari ini
+const p2 = x => String(x).padStart(2, '0');
+function tambahHari(t, n) {  // aritmetik tarikh tempatan (bukan UTC)
+  const d = new Date(t + 'T00:00:00'); d.setDate(d.getDate() + n);
+  return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
+}
+async function pilihTarikhGerak(t) {
+  tarikhGerak = !t || t >= data.hari_ini ? null : t;
+  gerakTarikh = null;
+  if (tarikhGerak) {
+    try { gerakTarikh = (await (await fetch('/api/pergerakan?tarikh=' + tarikhGerak)).json()).pergerakan || {}; }
+    catch (e) { toast('Tak dapat baca pergerakan'); }
+  }
+  lukisRumah();
+}
+$('#tarikh-gerak').addEventListener('change', e => pilihTarikhGerak(e.target.value));
+$('#gerak-hari-ini').onclick = () => pilihTarikhGerak(null);
+$('#gerak-sebelum').onclick = () => pilihTarikhGerak(tambahHari(tarikhGerak || data.hari_ini, -1));
+$('#gerak-selepas').onclick = () => pilihTarikhGerak(tambahHari(tarikhGerak || data.hari_ini, 1));
+function kemasPilihGerak() {
+  const el = $('#tarikh-gerak');
+  if (data.hari_ini) { el.max = data.hari_ini; if (document.activeElement !== el) el.value = tarikhGerak || data.hari_ini; }
+  const senarai = data.tarikh_log || [];
+  if (senarai.length) el.min = senarai[senarai.length - 1];
+  $('#gerak-selepas').disabled = !tarikhGerak;
+  $('#tajuk-gerak').textContent = tarikhGerak ? 'Pergerakan ' + namaHari(tarikhGerak) : 'Pergerakan hari ini';
+}
+
 function lukisRumah() {
+  kemasPilihGerak();
   const ol = data.orang || [];
   const dalam = ol.filter(o => o.status && o.status.arah === 'masuk');
   const luar = ol.filter(o => o.status && o.status.arah === 'keluar');
@@ -463,8 +500,10 @@ function lukisRumah() {
           ${terakhirHtml(o)}
         </div>
       </div>
-      ${o.hari_ini && o.hari_ini.length ? `<div class="jejak">${o.hari_ini.map(g =>
-          `<span>${g.arah === 'masuk' ? '🟢' : '⚪'} ${esc(g.masa)} ${g.arah}</span>`).join('')}</div>` : ''}
+      ${(() => { const j = tarikhGerak ? ((gerakTarikh || {})[o.nama] || []) : (o.hari_ini || []);
+                 return j.length ? `<div class="jejak">${j.map(g =>
+                   `<span>${g.arah === 'masuk' ? '🟢' : '⚪'} ${esc(g.masa)} ${g.arah}</span>`).join('')}</div>`
+                 : tarikhGerak ? '<div class="jejak"><span>Tiada pergerakan pada tarikh ini</span></div>' : ''; })()}
       <div class="baris">
         <button class="btn" data-status="masuk" ${arah === 'masuk' ? 'disabled' : ''}>Tandakan di rumah</button>
         <button class="btn" data-status="keluar" ${arah === 'keluar' ? 'disabled' : ''}>Tandakan keluar</button>
