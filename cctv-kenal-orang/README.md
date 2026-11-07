@@ -103,6 +103,19 @@ Dalam tab **Langsung**, pilih **Arah kamera ini** untuk setiap kamera:
 | Orang yang dilihat kamera ini sedang **MASUK** | Kamera di luar yang menghadap laluan masuk (contohnya pagar). Kamera ini nampak wajah orang yang datang |
 | Orang yang dilihat kamera ini sedang **KELUAR** | Kamera **di dalam rumah yang menghadap pintu**. Kamera ini nampak wajah orang yang keluar |
 | **Ikut arah gerakan** (berjalan ke arah kamera = MASUK atau KELUAR) | Satu kamera yang nampak wajah dari kedua-dua arah. Wajah yang makin besar bermaksud orang itu berjalan ke arah kamera |
+| **Kamera di sisi laluan**: bergerak ke KANAN (atau KIRI) dalam video = MASUK | **Satu kamera untuk masuk dan keluar.** Pasang di tepi laluan, menghala melintang ke laluan, supaya orang dari kedua-dua arah dilihat dari sisi depan (¾ wajah) semasa mendekati kamera. Arah ditentukan dari gerakan kiri/kanan dalam video |
+
+**Satu kamera untuk masuk dan keluar (kamera di sisi laluan):**
+
+    [PAGAR] ═══════════ laluan ═══════════ [PINTU]
+                     ↖  📷  ↗     (di dinding/tiang tepi laluan, ~2 m tinggi,
+                                   2–3 m dari laluan, menghala melintang)
+
+1. Pasang kamera di tepi laluan, lebih kurang di tengah antara pagar dan pintu. Halakan melintang ke laluan supaya
+   kedua-dua hujung laluan kelihatan dalam video.
+2. Dalam tab Langsung, lihat ke arah mana orang yang **masuk** bergerak dalam video (ke kiri atau ke kanan).
+3. Pada **Arah kamera ini**, pilih *"Kamera di sisi laluan: bergerak ke KANAN dalam video = MASUK"* (atau KIRI).
+4. Cuba berjalan masuk dan keluar. Tab 🏠 *Di rumah* dan terminal (`[MASUK]` / `[KELUAR]`) akan menunjukkan hasilnya.
 
 Sistem kenal wajah perlukan muka. Orang yang keluar biasanya membelakangkan kamera luar, jadi cara paling tepat
 ialah satu kamera **MASUK** di luar dan satu kamera **KELUAR** di dalam rumah.

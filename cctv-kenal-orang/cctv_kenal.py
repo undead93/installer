@@ -52,7 +52,10 @@ HALAMAN = ROOT / "halaman.html"
 WA_DIR = ROOT / "whatsapp"         # penghantar WhatsApp (Baileys, Node.js)
 TETAPAN = ROOT / "tetapan.json"
 STATUS = ROOT / "status.json"      # siapa di rumah: arah & masa terakhir setiap orang
-ARAH_SAH = ("tiada", "masuk", "keluar", "gerak_masuk", "gerak_keluar")   # siapa yang tidak hantar notifikasi, dll
+# arah kamera: tetap (masuk/keluar), ikut saiz wajah (kamera menghadap laluan),
+# atau ikut gerakan kiri/kanan dalam video (kamera di sisi laluan)
+ARAH_SAH = ("tiada", "masuk", "keluar", "gerak_masuk", "gerak_keluar", "kanan_masuk", "kiri_masuk")
+MOD_GERAK = ("gerak_masuk", "gerak_keluar", "kanan_masuk", "kiri_masuk")
 
 MODELS = {
     "face_detection_yunet_2023mar.onnx": "models/face_detection_yunet/face_detection_yunet_2023mar.onnx",
@@ -63,7 +66,7 @@ MIRRORS = [
     "https://media.githubusercontent.com/media/opencv/opencv_zoo/main/",
 ]
 IMG_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
-VERSI = "2026.11.07b"  # dipaparkan dalam terminal & page web, untuk sahkan versi yang sedang berjalan
+VERSI = "2026.11.07c"  # dipaparkan dalam terminal & page web, untuk sahkan versi yang sedang berjalan
 DETECT_WIDTH = 1280  # bingkai besar dikecilkan ke lebar ini untuk kesan wajah (640 terlepas wajah <~135px pada 2K)
 NAMA_SAH = re.compile(r"^[\w][\w .'-]{0,39}$")
 
@@ -1924,14 +1927,24 @@ def cmd_pantau(a):
             diag_akhir[kunci] = time.time()
             print(f"[maklum] {mesej}")
 
-    def arah_gerakan(sej_saiz):
-        """'dekat' jika wajah makin besar (berjalan ke arah kamera), 'jauh' jika makin kecil, None jika tak pasti."""
-        saiz = [w for _, w in sej_saiz]
-        if len(saiz) < 4:
+    def arah_gerakan(sej, mod):
+        """Tentukan masuk/keluar dari sejarah wajah [(masa, saiz, x_tengah 0..1)].
+        gerak_*: saiz wajah (makin besar = berjalan ke arah kamera). kanan_/kiri_masuk: gerakan melintang dalam video."""
+        if len(sej) < 4:
             return None
-        n = max(1, len(saiz) // 3)
-        nisbah = float(np.median(saiz[-n:])) / max(1.0, float(np.median(saiz[:n])))
-        return "dekat" if nisbah > 1.15 else "jauh" if nisbah < 0.87 else None
+        n = max(1, len(sej) // 3)
+        awal, akhir = list(sej)[:n], list(sej)[-n:]
+        if mod in ("kanan_masuk", "kiri_masuk"):
+            dx = float(np.median([e[2] for e in akhir])) - float(np.median([e[2] for e in awal]))
+            if abs(dx) < 0.06:  # bergerak kurang dari 6% lebar gambar: tak pasti
+                return None
+            ke_kanan = dx > 0
+            return "masuk" if ke_kanan == (mod == "kanan_masuk") else "keluar"
+        nisbah = float(np.median([e[1] for e in akhir])) / max(1.0, float(np.median([e[1] for e in awal])))
+        if 0.87 <= nisbah <= 1.15:
+            return None
+        dekat = nisbah > 1.15
+        return "masuk" if dekat == (mod == "gerak_masuk") else "keluar"
 
     def cetus(kk, kunci, nama, kid, img, t_kam, sekarang, arah):
         """Hantar notifikasi (dengan klip) untuk orang yang telah disahkan."""
@@ -1984,8 +1997,7 @@ def cmd_pantau(a):
             if sekarang - t["t"] < 2.5 and sekarang - akhir < 1.5:
                 continue  # tunggu lagi
             del kk.tertunda[kunci]
-            g = arah_gerakan(sej_saiz)
-            arah = None if g is None else ("masuk" if (g == "dekat") == (mod == "gerak_masuk") else "keluar")
+            arah = arah_gerakan(sej_saiz, mod)
             cetus(kk, kunci, t["nama"], t["kid"], t["img"], t["t_kam"], sekarang, arah)
 
     def proses(kk, img):
@@ -2073,7 +2085,7 @@ def cmd_pantau(a):
 
             # --- sejarah saiz wajah (untuk arah gerakan: makin besar = berjalan ke arah kamera)
             ss = kk.sejarah.setdefault(kunci, deque(maxlen=80))
-            ss.append((sekarang, float(max(w, h))))
+            ss.append((sekarang, float(max(w, h)), (x + w / 2) / img.shape[1]))
             while ss and ss[0][0] < sekarang - 8:
                 ss.popleft()
             if len(kk.sejarah) > 200:
@@ -2111,7 +2123,7 @@ def cmd_pantau(a):
                     continue
             sej.clear()
             mod = stor.arah_untuk(kk.nama)
-            if mod in ("gerak_masuk", "gerak_keluar"):
+            if mod in MOD_GERAK:
                 if kunci not in kk.tertunda:  # tunggu arah gerakan jelas sebelum hantar
                     kk.tertunda[kunci] = {"nama": nama, "kid": kid, "img": img, "t": sekarang, "t_kam": kam.masa}
                 continue
