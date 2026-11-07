@@ -63,6 +63,7 @@ MIRRORS = [
     "https://media.githubusercontent.com/media/opencv/opencv_zoo/main/",
 ]
 IMG_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+VERSI = "2026.11.07b"  # dipaparkan dalam terminal & page web, untuk sahkan versi yang sedang berjalan
 DETECT_WIDTH = 1280  # bingkai besar dikecilkan ke lebar ini untuk kesan wajah (640 terlepas wajah <~135px pada 2K)
 NAMA_SAH = re.compile(r"^[\w][\w .'-]{0,39}$")
 
@@ -958,6 +959,7 @@ class Stor:
                 "kamera": list(self.kamera) or list(self.bingkai),
                 "zon": dict(self.tetapan["zon"]),
                 "https": getattr(self, "port_https", None),
+                "versi": VERSI,
                 "arah": dict(self.tetapan["arah"]),
                 "saluran": self.notif.nama if self.notif else [],
                 "whatsapp": self.notif.whatsapp.status()
@@ -1807,6 +1809,8 @@ class KonteksKamera:
         self.cache = []           # [(kotak, cap jari, masa)] dari bingkai sebelumnya
         self.kad_baru = set()  # kad orang asing yang baru dicipta (untuk label 🆕)
         self.sejarah = {}      # kunci -> deque[(masa, saiz wajah)]: untuk tahu arah gerakan
+        self.calon_status = {}  # nama -> deque[(masa, skor)]: pengecaman untuk kemas kini status di rumah
+        self.arah_baru = set()  # nama yang statusnya baru berubah (notifikasi seterusnya abaikan cooldown)
         self.tertunda = {}     # kunci -> notifikasi yang menunggu arah gerakan jelas
 
 
@@ -1838,6 +1842,7 @@ def cmd_pantau(a):
     print(f"Had skor: kenal {a.ambang} | notifikasi {a.ambang_maklum} | kumpul wajah baru {a.ambang_kumpul}")
     stor = Stor(enjin, a.ambang, a.ambang_kumpul, a.maks_gambar, a.selang_simpan, a.saiz_min)
     stor.bersih(a.simpan_hari)
+    print(f"CCTV Kenal Orang versi {VERSI}")
     print(f"Orang berdaftar: {len(set(stor.nama))} ({', '.join(sorted(set(stor.nama))) or '-'})")
     print(f"Kumpulan wajah belum dinamakan: {len(stor.kumpulan)}")
 
@@ -1936,7 +1941,8 @@ def cmd_pantau(a):
             baris = ("🆕 Orang baru tidak dikenali" if kid in kk.kad_baru else "⚠️ Orang tidak dikenali") + \
                 {"masuk": " – sedang masuk", "keluar": " – sedang keluar"}.get(arah, "")
         # 1. status siapa di rumah: SENTIASA dikemas kini bila arah berubah (tidak bergantung pada cooldown notifikasi)
-        berubah = False
+        berubah = nama in kk.arah_baru  # status baru berubah melalui kemas_kini_status() -> tetap maklumkan
+        kk.arah_baru.discard(nama)
         if arah and nama is not None and stor.status.get(nama, {}).get("arah") != arah:
             stor.kemas_status(nama, arah, kk.nama)
             berubah = True
@@ -2049,6 +2055,21 @@ def cmd_pantau(a):
                 print(f"{masa}  {label_log:<22} skor={skor:.2f}" + (f"  [{kk.nama}]" if banyak else ""))
                 if nama is None:
                     cv2.imwrite(str(TANGKAPAN / f"asing_{datetime.now():%Y%m%d_%H%M%S}_{slug(kk.nama)}.jpg"), img)
+
+            # --- status di rumah (syarat lebih ringan dari notifikasi): kamera MASUK/KELUAR yang kenal ahli keluarga
+            mod_arah = stor.arah_untuk(kk.nama)
+            if nama is not None and mod_arah in ("masuk", "keluar"):
+                cs = kk.calon_status.setdefault(nama, deque())
+                cs.append((sekarang, skor))
+                while cs and cs[0][0] < sekarang - a.tempoh_sahkan:
+                    cs.popleft()
+                yakin = skor >= a.ambang_maklum + 0.1 or (len(cs) >= 2 and np.mean([v for _, v in cs]) >= a.ambang_maklum)
+                if yakin and stor.status.get(nama, {}).get("arah") != mod_arah and stor.beza_kedua(f, nama) >= a.beza_min:
+                    stor.kemas_status(nama, mod_arah, kk.nama)
+                    kk.arah_baru.add(nama)
+                    masa = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    stor.tulis_log([masa, nama, f"{skor:.3f}", "", kk.nama, mod_arah])
+                    print(f"{masa}  [{mod_arah.upper()}] {nama} (status dikemas kini)" + (f"  [{kk.nama}]" if banyak else ""))
 
             # --- sejarah saiz wajah (untuk arah gerakan: makin besar = berjalan ke arah kamera)
             ss = kk.sejarah.setdefault(kunci, deque(maxlen=80))

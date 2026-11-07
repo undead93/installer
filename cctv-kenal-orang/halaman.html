@@ -146,7 +146,7 @@
 <body>
 <header>
   <div class="bar">
-    <h1>CCTV Kenal Orang</h1>
+    <h1>CCTV Kenal Orang <span class="pudar" id="versi" style="font-size:11px;font-weight:400"></span></h1>
     <nav>
       <button data-tab="rumah" class="aktif">🏠 Di rumah</button>
       <button data-tab="baru">Wajah baru<span class="bil" id="bil-baru" hidden></span></button>
@@ -329,6 +329,7 @@ function lukis() {
     : 'Belum disetkan. Lihat README untuk sambung WhatsApp.';
   $('#btn-uji').disabled = !(data.saluran && data.saluran.length);
   lukisWA(data.whatsapp);
+  $('#versi').textContent = data.versi ? 'v' + data.versi : '';
   lukisRumah(); lukisBaru(); lukisOrang(); lukisLog(); lukisZonStatus();
 }
 
