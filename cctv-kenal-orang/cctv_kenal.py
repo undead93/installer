@@ -1935,17 +1935,24 @@ def cmd_pantau(a):
         else:
             baris = ("🆕 Orang baru tidak dikenali" if kid in kk.kad_baru else "⚠️ Orang tidak dikenali") + \
                 {"masuk": " – sedang masuk", "keluar": " – sedang keluar"}.get(arah, "")
+        # 1. status siapa di rumah: SENTIASA dikemas kini bila arah berubah (tidak bergantung pada cooldown notifikasi)
+        berubah = False
+        if arah and nama is not None and stor.status.get(nama, {}).get("arah") != arah:
+            stor.kemas_status(nama, arah, kk.nama)
+            berubah = True
+            masa = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            stor.tulis_log([masa, nama, "", "", kk.nama, arah])
+            print(f"{masa}  [{arah.upper()}] {nama}" + (f"  [{kk.nama}]" if banyak else ""))
+        # 2. notifikasi: cooldown mengelak mesej berulang, tetapi perubahan arah (keluar -> masuk) sentiasa dimaklumkan
         km = f"{kunci}:{arah or '-'}"  # masuk & keluar ada cooldown berasingan
-        if sekarang - kali_maklum.get(km, 0) < a.cooldown_maklum:
+        if sekarang - kali_maklum.get(km, 0) < a.cooldown_maklum and not berubah:
             return
         kali_maklum[km] = sekarang
         kk.kad_baru.discard(kid)
-        if arah:
-            if nama is not None:
-                stor.kemas_status(nama, arah, kk.nama)
+        if arah and nama is None:
             masa = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            stor.tulis_log([masa, nama or "TIDAK DIKENALI", "", kid or "", kk.nama, arah])
-            print(f"{masa}  [{arah.upper()}] {nama or 'TIDAK DIKENALI'}" + (f"  [{kk.nama}]" if banyak else ""))
+            stor.tulis_log([masa, "TIDAK DIKENALI", "", kid or "", kk.nama, arah])
+            print(f"{masa}  [{arah.upper()}] TIDAK DIKENALI" + (f"  [{kk.nama}]" if banyak else ""))
         if not guna_video:
             notif.hantar(susun_teks([baris], sekarang, nama is None, kk.nama), img)
             return
