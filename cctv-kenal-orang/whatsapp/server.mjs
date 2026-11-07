@@ -1,4 +1,4 @@
-// Penghantar WhatsApp untuk CCTV Kenal Orang, guna Baileys (WhatsApp Web).
+// Penghantar WhatsApp untuk CCTV Rumah, guna Baileys (WhatsApp Web).
 // Dijalankan sendiri oleh cctv_kenal.py, atau secara manual: node server.mjs
 //
 // API (hanya dari komputer ini, 127.0.0.1):
@@ -38,7 +38,7 @@ async function mula () {
     auth: state,
     version,
     logger: pino({ level: 'silent' }),
-    browser: Browsers.macOS('CCTV Kenal Orang'),
+    browser: Browsers.macOS('CCTV Rumah'),
     markOnlineOnConnect: false,
     syncFullHistory: false,
   })

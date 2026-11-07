@@ -3,156 +3,245 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CCTV Kenal Orang</title>
+<title>CCTV Rumah</title>
+<meta name="theme-color" content="#0a0c10">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>
+  /* ===== CCTV Rumah – tema "midnight & champagne" ===== */
   :root {
-    --bg: #f5f6f8; --kad: #ffffff; --teks: #1b1f24; --pudar: #667085; --garis: #e4e7ec;
-    --utama: #2563eb; --utama-teks: #ffffff; --ok: #15803d; --bahaya: #dc2626; --chip: #eef2ff;
+    --bg: #0a0c10; --bg2: #0e1117; --kad: #11151c; --kad2: #161b24; --teks: #eef1f6; --pudar: #8e97a9;
+    --garis: rgba(255,255,255,.07); --garis2: rgba(255,255,255,.12);
+    --emas: #d8b46a; --emas2: #f3dca6; --emas3: #9c7a35;
+    --utama: var(--emas); --utama-teks: #17130a; --ok: #3ddc97; --ok-latar: rgba(61,220,151,.12);
+    --bahaya: #ff6b6b; --amaran: #f5b544; --chip: rgba(216,180,106,.12);
+    --bayang: 0 12px 32px rgba(0,0,0,.38); --bayang-kecil: 0 4px 14px rgba(0,0,0,.28);
+    --cahaya: radial-gradient(1200px 600px at 10% -10%, rgba(216,180,106,.10), transparent 60%),
+              radial-gradient(900px 500px at 110% 0%, rgba(80,120,255,.08), transparent 60%);
+    color-scheme: dark;
   }
-  @media (prefers-color-scheme: dark) {
+  @media (prefers-color-scheme: light) {
     :root {
-      --bg: #0e1014; --kad: #171a20; --teks: #e6e8eb; --pudar: #98a2b3; --garis: #2a2f38;
-      --utama: #3b82f6; --utama-teks: #ffffff; --ok: #4ade80; --bahaya: #f87171; --chip: #1e2a44;
+      --bg: #f5f3ee; --bg2: #ffffff; --kad: #ffffff; --kad2: #fbfaf7; --teks: #1c1a16; --pudar: #7b756a;
+      --garis: rgba(30,25,15,.08); --garis2: rgba(30,25,15,.14);
+      --emas: #b38a36; --emas2: #d9b56a; --emas3: #8a6a26; --utama-teks: #ffffff;
+      --ok: #16a34a; --ok-latar: rgba(22,163,74,.10); --bahaya: #dc2626; --chip: rgba(179,138,54,.10);
+      --bayang: 0 12px 30px rgba(60,45,15,.10); --bayang-kecil: 0 4px 12px rgba(60,45,15,.08);
+      --cahaya: radial-gradient(1200px 600px at 10% -10%, rgba(179,138,54,.10), transparent 60%);
+      color-scheme: light;
     }
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--teks);
-         font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-  header { position: sticky; top: 0; z-index: 5; background: var(--kad); border-bottom: 1px solid var(--garis); }
-  .bar { max-width: 960px; margin: 0 auto; padding: 12px 16px 0; }
-  h1 { font-size: 17px; margin: 0 0 10px; }
-  nav { display: flex; gap: 4px; overflow-x: auto; }
-  nav button { border: 0; background: none; color: var(--pudar); padding: 8px 12px 10px; font: inherit;
-               border-bottom: 2px solid transparent; cursor: pointer; white-space: nowrap; }
-  nav button.aktif { color: var(--teks); border-color: var(--utama); font-weight: 600; }
-  .bil { display: inline-block; min-width: 20px; padding: 0 6px; margin-left: 4px; border-radius: 10px;
-         background: var(--bahaya); color: #fff; font-size: 12px; line-height: 18px; text-align: center; }
+  [hidden] { display: none !important; }  /* atribut hidden sentiasa menang (cth .baris yang flex) */
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--bg); background-image: var(--cahaya); background-attachment: fixed; color: var(--teks);
+         font: 15px/1.5 "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+         -webkit-font-smoothing: antialiased; }
+  ::selection { background: var(--emas); color: var(--utama-teks); }
+
+  /* --- kepala --- */
+  header { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 78%, transparent);
+           backdrop-filter: saturate(160%) blur(16px); -webkit-backdrop-filter: saturate(160%) blur(16px);
+           border-bottom: 1px solid var(--garis); }
+  .bar { max-width: 1040px; margin: 0 auto; padding: 14px 16px 12px; }
+  .jenama { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+  .logo { width: 42px; height: 42px; border-radius: 13px; display: grid; place-items: center; flex: none;
+          background: linear-gradient(145deg, var(--emas2), var(--emas) 45%, var(--emas3));
+          box-shadow: 0 6px 18px rgba(216,180,106,.28), inset 0 1px 0 rgba(255,255,255,.4); }
+  .logo svg { width: 24px; height: 24px; }
+  h1 { font-size: 19px; margin: 0; letter-spacing: .2px; font-weight: 800; line-height: 1.15; }
+  h1 em { font-style: normal; background: linear-gradient(90deg, var(--emas2), var(--emas));
+          -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .subjudul { color: var(--pudar); font-size: 12px; letter-spacing: .3px; }
+  #versi { opacity: .7; margin-left: 4px; }
+  .sistem { margin-left: auto; display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600;
+            padding: 6px 11px; border-radius: 999px; border: 1px solid var(--garis2); color: var(--ok); background: var(--ok-latar); }
+  .sistem .nadi { width: 8px; height: 8px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 0 currentColor;
+                  animation: nadi 2s infinite; }
+  .sistem.putus { color: var(--bahaya); background: rgba(255,107,107,.1); }
+  @keyframes nadi { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 60%, transparent); }
+                    70% { box-shadow: 0 0 0 8px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+  nav { display: flex; gap: 4px; overflow-x: auto; padding: 4px; border-radius: 16px; background: var(--kad);
+        border: 1px solid var(--garis); scrollbar-width: none; }
+  nav::-webkit-scrollbar { display: none; }
+  nav button { display: inline-flex; align-items: center; gap: 7px; border: 0; background: none; color: var(--pudar);
+               padding: 9px 14px; font: inherit; font-size: 14px; font-weight: 600; border-radius: 12px; cursor: pointer;
+               white-space: nowrap; transition: color .15s, background .15s; }
+  nav button svg { width: 17px; height: 17px; flex: none; }
+  nav button:hover { color: var(--teks); }
+  nav button.aktif { color: var(--utama-teks); background: linear-gradient(145deg, var(--emas2), var(--emas));
+                     box-shadow: 0 4px 14px rgba(216,180,106,.25); }
+  .bil { display: inline-block; min-width: 19px; padding: 0 6px; border-radius: 10px; background: var(--bahaya);
+         color: #fff; font-size: 11px; line-height: 18px; text-align: center; font-weight: 700; }
   .bil[hidden] { display: none; }
-  main { max-width: 960px; margin: 0 auto; padding: 16px; }
-  .kad { background: var(--kad); border: 1px solid var(--garis); border-radius: 12px; padding: 14px; margin-bottom: 14px; }
+
+  /* --- asas --- */
+  main { max-width: 1040px; margin: 0 auto; padding: 18px 16px 28px; }
+  .kad { background: linear-gradient(180deg, var(--kad2), var(--kad)); border: 1px solid var(--garis); border-radius: 20px;
+         padding: 16px; margin-bottom: 14px; box-shadow: var(--bayang-kecil); }
   .atas { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 10px; }
-  .atas b { font-size: 16px; }
+  .atas b { font-size: 16px; font-weight: 700; }
   .pudar { color: var(--pudar); font-size: 13px; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 6px; }
-  .gmb { position: relative; aspect-ratio: 1; border-radius: 8px; overflow: hidden; cursor: pointer;
-         background: var(--garis); border: 0; padding: 0; }
+  h2 { font-size: 13px; margin: 6px 2px 12px; text-transform: uppercase; letter-spacing: 1.4px; color: var(--pudar); font-weight: 700; }
+  .bantu { color: var(--pudar); font-size: 13px; margin: 0 2px 16px; }
+  .kosong { text-align: center; color: var(--pudar); padding: 48px 16px; border: 1px dashed var(--garis2); border-radius: 20px; }
+  code { background: var(--chip); padding: 1px 6px; border-radius: 6px; }
+
+  /* --- grid gambar --- */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 8px; }
+  .gmb { position: relative; aspect-ratio: 1; border-radius: 14px; overflow: hidden; cursor: pointer;
+         background: var(--bg2); border: 1px solid var(--garis); padding: 0; transition: transform .15s; }
+  .gmb:hover { transform: translateY(-1px); }
   .gmb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .gmb.keluar img { opacity: .25; }
-  .lencana { position: absolute; left: 3px; bottom: 3px; background: rgba(0,0,0,.65); color: #fff;
-             font-size: 10px; line-height: 15px; padding: 0 5px; border-radius: 8px; pointer-events: none; }
-  .gmb.curiga { outline: 3px solid #f59e0b; outline-offset: -3px; }
-  .gmb.curiga .lencana { background: #b45309; }
-  #lapisan { position: fixed; inset: 0; z-index: 9; background: rgba(0,0,0,.45); display: flex; align-items: flex-end; justify-content: center; }
-  #lapisan[hidden] { display: none; }
-  #menu-gambar { background: var(--kad); width: 100%; max-width: 520px; border-radius: 16px 16px 0 0; padding: 16px; }
-  #menu-gambar img { width: 96px; height: 96px; object-fit: cover; border-radius: 10px; float: left; margin-right: 12px; }
-  #menu-gambar .baris { clear: both; padding-top: 12px; }
+  .gmb.keluar img { opacity: .22; }
   .gmb.keluar::after { content: "✕"; position: absolute; inset: 0; display: grid; place-items: center;
-                       color: var(--bahaya); font-size: 28px; font-weight: 700; }
+                       color: var(--bahaya); font-size: 28px; font-weight: 800; }
+  .lencana { position: absolute; left: 4px; bottom: 4px; background: rgba(0,0,0,.6); color: #fff; backdrop-filter: blur(6px);
+             font-size: 10px; line-height: 16px; padding: 0 6px; border-radius: 8px; pointer-events: none; font-weight: 600; }
+  .gmb.curiga { outline: 2px solid var(--amaran); outline-offset: -2px; }
+  .gmb.curiga .lencana { background: #b45309; }
+  .tanda { position: absolute; right: 4px; top: 4px; font-size: 14px; }
+
+  /* --- borang & butang --- */
   .baris { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
-  input[type=text] { flex: 1 1 180px; min-width: 0; padding: 10px 12px; font: inherit; color: var(--teks);
-                     background: var(--bg); border: 1px solid var(--garis); border-radius: 8px; }
-  input[type=text]:focus { outline: 2px solid var(--utama); outline-offset: -1px; }
-  button.btn { padding: 10px 14px; font: inherit; border-radius: 8px; cursor: pointer;
-               border: 1px solid var(--garis); background: var(--kad); color: var(--teks); }
-  button.btn.utama { background: var(--utama); border-color: var(--utama); color: var(--utama-teks); font-weight: 600; }
+  input[type=text], input[type=date], select {
+    flex: 1 1 180px; min-width: 0; padding: 11px 13px; font: inherit; color: var(--teks); background: var(--bg2);
+    border: 1px solid var(--garis2); border-radius: 12px; transition: border-color .15s, box-shadow .15s; }
+  input[type=text]:focus, input[type=date]:focus, select:focus {
+    outline: none; border-color: var(--emas); box-shadow: 0 0 0 3px color-mix(in srgb, var(--emas) 22%, transparent); }
+  button.btn { padding: 10px 15px; font: inherit; font-weight: 600; font-size: 14px; border-radius: 12px; cursor: pointer;
+               border: 1px solid var(--garis2); background: var(--kad2); color: var(--teks);
+               transition: transform .1s, border-color .15s, background .15s; }
+  button.btn:hover:not(:disabled) { border-color: color-mix(in srgb, var(--emas) 55%, var(--garis2)); }
+  button.btn:active:not(:disabled) { transform: scale(.98); }
+  button.btn.utama { background: linear-gradient(145deg, var(--emas2), var(--emas)); border-color: transparent;
+                     color: var(--utama-teks); box-shadow: 0 6px 16px rgba(216,180,106,.22); }
   button.btn.bahaya { color: var(--bahaya); }
-  button.btn:disabled { opacity: .5; cursor: default; }
-  .chip { border: 0; background: var(--chip); color: var(--utama); padding: 4px 10px; border-radius: 14px;
-          font: inherit; font-size: 13px; cursor: pointer; margin-top: 10px; }
-  .kosong { text-align: center; color: var(--pudar); padding: 40px 16px; }
-  .bantu { color: var(--pudar); font-size: 13px; margin: 0 0 14px; }
-  table { width: 100%; border-collapse: collapse; font-size: 14px; }
-  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--garis); }
-  th { color: var(--pudar); font-weight: 500; }
-  td.asing { color: var(--bahaya); }
-  #strim { width: 100%; border-radius: 12px; background: #000; min-height: 200px; display: block; }
-  .langsung-wrap { position: relative; }
-  #zon-lapis { position: absolute; inset: 0; cursor: crosshair; touch-action: none; border-radius: 12px;
-               background: rgba(0,0,0,.25); }
-  #zon-lapis[hidden], #zon-lukis[hidden] { display: none; }
-  #zon-lukis { position: absolute; border: 2px dashed #22c55e; background: rgba(34,197,94,.18); pointer-events: none; }
-  #zon-status { font-size: 13px; color: var(--pudar); margin-top: 8px; }
-  #toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--teks);
-           color: var(--bg); padding: 10px 16px; border-radius: 10px; font-size: 14px; opacity: 0;
-           transition: opacity .2s; pointer-events: none; max-width: calc(100% - 32px); }
-  #toast.tunjuk { opacity: 1; }
+  button.btn:disabled { opacity: .42; cursor: default; }
+  .chip { border: 1px solid color-mix(in srgb, var(--emas) 35%, transparent); background: var(--chip); color: var(--emas);
+          padding: 5px 12px; border-radius: 999px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; margin-top: 10px; }
+  .pilih { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--pudar); cursor: pointer; }
+  .pilih input { width: 18px; height: 18px; accent-color: var(--emas); margin: 0; }
+  .kad.dipilih { outline: 2px solid var(--emas); outline-offset: -1px; }
+  .suis { display: flex; align-items: center; gap: 10px; margin-top: 12px; cursor: pointer; user-select: none; }
+  .suis input { appearance: none; width: 46px; height: 27px; border-radius: 14px; background: var(--garis2);
+                position: relative; cursor: pointer; flex: none; margin: 0; transition: background .2s; }
+  .suis input::after { content: ""; position: absolute; top: 3px; left: 3px; width: 21px; height: 21px; border-radius: 50%;
+                       background: #fff; transition: left .2s; box-shadow: 0 2px 4px rgba(0,0,0,.35); }
+  .suis input:checked { background: linear-gradient(145deg, var(--emas2), var(--emas)); }
+  .suis input:checked::after { left: 22px; }
   .fail-input { display: none; }
-  .video-wrap { position: relative; margin-top: 12px; border-radius: 12px; overflow: hidden; background: #000; max-width: 520px; }
+
+  /* --- jadual log --- */
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 11px 8px; border-bottom: 1px solid var(--garis); }
+  th { color: var(--pudar); font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
+  tbody tr:hover td { background: color-mix(in srgb, var(--emas) 5%, transparent); }
+  td.asing { color: var(--bahaya); font-weight: 600; }
+
+  /* --- langsung & zon --- */
+  #strim { width: 100%; border-radius: 18px; background: #000; min-height: 200px; display: block; box-shadow: var(--bayang); }
+  .langsung-wrap { position: relative; }
+  #zon-lapis { position: absolute; inset: 0; cursor: crosshair; touch-action: none; border-radius: 18px; background: rgba(0,0,0,.28); }
+  #zon-lapis[hidden], #zon-lukis[hidden] { display: none; }
+  #zon-lukis { position: absolute; border: 2px dashed #3ddc97; background: rgba(61,220,151,.16); pointer-events: none; border-radius: 6px; }
+  #zon-status { font-size: 13px; color: var(--pudar); margin-top: 10px; }
+  .pilih-kamera { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+  .pilih-kamera[hidden] { display: none; }
+  .pilih-kamera button { border: 1px solid var(--garis2); background: var(--kad); color: var(--teks); padding: 8px 15px;
+                         border-radius: 999px; font: inherit; font-weight: 600; cursor: pointer; }
+  .pilih-kamera button.aktif { background: linear-gradient(145deg, var(--emas2), var(--emas)); border-color: transparent; color: var(--utama-teks); }
+
+  /* --- klip --- */
+  .klip-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; margin-bottom: 18px; }
+  .klip-grid .kad { margin: 0; padding: 10px; }
+  .klip-grid video { width: 100%; border-radius: 14px; background: #000; display: block; aspect-ratio: 16 / 9; }
+  .klip-grid .label { margin-top: 10px; font-weight: 700; }
+  .kamera-tag { display: inline-block; font-size: 11px; color: var(--emas); border: 1px solid color-mix(in srgb, var(--emas) 35%, transparent);
+                background: var(--chip); border-radius: 999px; padding: 1px 8px; margin-left: 6px; font-weight: 600; }
+
+  /* --- di rumah --- */
+  .ringkasan { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin-bottom: 18px; }
+  .ringkasan .angka { background: linear-gradient(180deg, var(--kad2), var(--kad)); border: 1px solid var(--garis);
+                      border-radius: 20px; padding: 16px 18px; box-shadow: var(--bayang-kecil); color: var(--pudar);
+                      font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; }
+  .ringkasan .angka b { display: block; font-size: 38px; line-height: 1.05; margin-bottom: 4px; letter-spacing: -1px; color: var(--teks); }
+  .ringkasan .angka:first-child b { color: var(--ok) !important; }
+  .rumah-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+  .rumah-grid .kad { margin: 0; padding: 18px; }
+  .orang-rumah { display: flex; align-items: center; gap: 16px; }
+  .orang-rumah img, .orang-rumah .tiada-gambar { width: 68px; height: 68px; border-radius: 50%; object-fit: cover; flex: none;
+                     border: 3px solid var(--garis2); background: var(--bg2); }
+  .orang-rumah.masuk img { border-color: var(--ok); box-shadow: 0 0 0 4px var(--ok-latar), 0 0 22px color-mix(in srgb, var(--ok) 30%, transparent); }
+  .orang-rumah b { font-size: 19px; font-weight: 800; letter-spacing: .1px; }
+  .masa-rumah { color: var(--pudar); font-size: 12.5px; margin-top: 4px; }
+  .jejak { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
+  .jejak span { font-size: 12px; padding: 4px 10px; border-radius: 999px; background: var(--bg2); border: 1px solid var(--garis); font-weight: 600; }
+  .rumah-grid .baris .btn { flex: 1 1 auto; padding: 9px 10px; font-size: 13.5px; }
+  span.status { display: inline-block; font-size: 12.5px; font-weight: 700; padding: 3px 10px; border-radius: 999px; margin-left: 6px; white-space: nowrap; }
+  span.status.masuk { background: var(--ok-latar); color: var(--ok); }
+  span.status.keluar { background: var(--garis); color: var(--pudar); }
+
+  /* --- notifikasi, WhatsApp --- */
+  .kad-notif { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .kad-notif .btn { padding: 7px 13px; font-size: 13.5px; }
+  .wa { width: 100%; }
+  .wa img { display: block; width: 220px; max-width: 100%; margin: 10px 0 6px; border-radius: 12px; background: #fff; padding: 8px; }
+  .titik { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--pudar); }
+  .titik.ok { background: var(--ok); } .titik.amaran { background: var(--amaran); }
+
+  /* --- kamera daftar wajah --- */
+  .video-wrap { position: relative; margin-top: 12px; border-radius: 18px; overflow: hidden; background: #000; max-width: 520px; box-shadow: var(--bayang); }
   #video-daftar { width: 100%; display: block; }
   #video-daftar.cermin { transform: scaleX(-1); }
   .bujur { position: absolute; left: 50%; top: 48%; width: 46%; aspect-ratio: 3 / 4; transform: translate(-50%, -50%);
            border: 3px dashed rgba(255,255,255,.8); border-radius: 50%; pointer-events: none; }
-  .bujur.tangkap { border-color: #22c55e; border-style: solid; }
-  #arahan-kamera { position: absolute; left: 0; right: 0; bottom: 0; padding: 10px; text-align: center; color: #fff;
-                   font-weight: 600; font-size: 17px; background: linear-gradient(transparent, rgba(0,0,0,.75)); }
+  .bujur.tangkap { border-color: #3ddc97; border-style: solid; }
+  #arahan-kamera { position: absolute; left: 0; right: 0; bottom: 0; padding: 12px; text-align: center; color: #fff;
+                   font-weight: 700; font-size: 17px; background: linear-gradient(transparent, rgba(0,0,0,.78)); }
   #hasil-tangkap .gmb { cursor: default; }
-  .tanda { position: absolute; right: 3px; top: 3px; font-size: 14px; }
-  .status { font-size: 13px; padding: 2px 8px; border-radius: 10px; margin-left: 6px; white-space: nowrap; }
-  .status.masuk { background: rgba(22,163,74,.15); color: var(--ok); }
-  .status.keluar { background: var(--garis); color: var(--pudar); }
-  .ringkasan { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
-  .ringkasan .angka { flex: 1 1 120px; background: var(--kad); border: 1px solid var(--garis); border-radius: 12px; padding: 12px 14px; }
-  .ringkasan .angka b { display: block; font-size: 28px; line-height: 1.1; }
-  .rumah-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
-  .rumah-grid .kad { margin: 0; }
-  .orang-rumah { display: flex; align-items: center; gap: 14px; }
-  .orang-rumah img, .orang-rumah .tiada-gambar { width: 64px; height: 64px; border-radius: 50%; object-fit: cover; flex: none;
-                     border: 3px solid var(--garis); background: var(--garis); }
-  .orang-rumah.masuk img { border-color: var(--ok); }
-  .orang-rumah b { font-size: 18px; }
-  .masa-rumah { color: var(--pudar); font-size: 13px; margin-top: 2px; }
-  .jejak { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
-  .jejak span { font-size: 12px; padding: 3px 8px; border-radius: 10px; background: var(--bg); border: 1px solid var(--garis); }
-  .rumah-grid .baris .btn { flex: 1 1 auto; padding: 8px 10px; font-size: 14px; }
-  select { padding: 9px 10px; font: inherit; color: var(--teks); background: var(--bg); border: 1px solid var(--garis);
-           border-radius: 8px; flex: 1 1 220px; min-width: 0; }
-  .pilih { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--pudar); cursor: pointer; }
-  .pilih input { width: 18px; height: 18px; accent-color: var(--utama); margin: 0; }
-  .kad.dipilih { outline: 2px solid var(--utama); outline-offset: -1px; }
-  #bar-gabung { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; background: var(--kad);
-                border-top: 1px solid var(--garis); padding: 12px 16px; display: flex; gap: 8px;
-                align-items: center; justify-content: center; box-shadow: 0 -4px 16px rgba(0,0,0,.12); }
+
+  /* --- lapisan, bar, toast --- */
+  #lapisan { position: fixed; inset: 0; z-index: 9; background: rgba(0,0,0,.55); backdrop-filter: blur(4px);
+             display: flex; align-items: flex-end; justify-content: center; }
+  #lapisan[hidden] { display: none; }
+  #menu-gambar { background: var(--kad2); width: 100%; max-width: 520px; border-radius: 24px 24px 0 0; padding: 18px;
+                 border: 1px solid var(--garis2); box-shadow: var(--bayang); }
+  #menu-gambar img { width: 96px; height: 96px; object-fit: cover; border-radius: 14px; float: left; margin-right: 14px; }
+  #menu-gambar .baris { clear: both; padding-top: 12px; }
+  #bar-gabung { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; background: color-mix(in srgb, var(--kad2) 88%, transparent);
+                backdrop-filter: blur(14px); border-top: 1px solid var(--garis2); padding: 12px 16px; display: flex; gap: 8px;
+                align-items: center; justify-content: center; }
   #bar-gabung[hidden] { display: none; }
   body:has(#bar-gabung:not([hidden])) main { padding-bottom: 96px; }
   #bar-gabung span { flex: 1; max-width: 420px; }
-  .suis { display: flex; align-items: center; gap: 10px; margin-top: 12px; cursor: pointer; user-select: none; }
-  .suis input { appearance: none; width: 44px; height: 26px; border-radius: 13px; background: var(--garis);
-                position: relative; cursor: pointer; flex: none; margin: 0; transition: background .15s; }
-  .suis input::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px;
-                       border-radius: 50%; background: #fff; transition: left .15s; box-shadow: 0 1px 2px rgba(0,0,0,.3); }
-  .suis input:checked { background: var(--ok); }
-  .suis input:checked::after { left: 21px; }
-  .status { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
-  .status .btn { padding: 6px 12px; font-size: 14px; }
-  .wa { width: 100%; }
-  .klip-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin-bottom: 14px; }
-  .klip-grid .kad { margin: 0; padding: 10px; }
-  .klip-grid video { width: 100%; border-radius: 8px; background: #000; display: block; aspect-ratio: 16 / 9; }
-  .klip-grid .label { margin-top: 8px; font-weight: 600; }
-  h2 { font-size: 15px; margin: 4px 0 10px; }
-  .pilih-kamera { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
-  .pilih-kamera[hidden] { display: none; }
-  .pilih-kamera button { border: 1px solid var(--garis); background: var(--kad); color: var(--teks);
-                         padding: 8px 14px; border-radius: 20px; font: inherit; cursor: pointer; }
-  .pilih-kamera button.aktif { background: var(--utama); border-color: var(--utama); color: var(--utama-teks); }
-  .kamera-tag { display: inline-block; font-size: 12px; color: var(--pudar); border: 1px solid var(--garis);
-                border-radius: 10px; padding: 0 7px; margin-left: 4px; }
-  .wa img { display: block; width: 220px; max-width: 100%; margin: 10px 0 6px; border-radius: 8px; background: #fff; padding: 6px; }
-  .titik { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--pudar); }
-  .titik.ok { background: var(--ok); } .titik.amaran { background: #f59e0b; }
+  #toast { position: fixed; left: 50%; bottom: 22px; transform: translate(-50%, 8px); background: color-mix(in srgb, var(--kad2) 92%, transparent);
+           color: var(--teks); border: 1px solid var(--garis2); backdrop-filter: blur(14px); padding: 11px 18px; border-radius: 14px;
+           font-size: 14px; font-weight: 600; opacity: 0; transition: opacity .2s, transform .2s; pointer-events: none;
+           max-width: calc(100% - 32px); box-shadow: var(--bayang); z-index: 10; }
+  #toast.tunjuk { opacity: 1; transform: translate(-50%, 0); }
+  footer { max-width: 1040px; margin: 0 auto; padding: 4px 16px 24px; color: var(--pudar); font-size: 12px; text-align: center; letter-spacing: .3px; }
+  @media (max-width: 520px) { .bar { padding: 12px 12px 10px; } main { padding: 14px 12px 24px; } .sistem span.teks { display: none; } }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 </style>
 </head>
 <body>
 <header>
   <div class="bar">
-    <h1>CCTV Kenal Orang <span class="pudar" id="versi" style="font-size:11px;font-weight:400"></span></h1>
+    <div class="jenama">
+      <div class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="#17130a" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11 12 4l9 7"/><path d="M5.5 9.5V20h13V9.5"/><circle cx="12" cy="14" r="2.6"/><path d="M12 11.4v-.4"/></svg></div>
+      <div>
+        <h1>CCTV <em>Rumah</em></h1>
+        <div class="subjudul">Pengecaman wajah pintar<span id="versi"></span></div>
+      </div>
+      <div class="sistem" id="status-sistem" title="Status sambungan ke sistem"><span class="nadi"></span><span class="teks">Aktif</span></div>
+    </div>
     <nav>
-      <button data-tab="rumah" class="aktif">🏠 Di rumah</button>
-      <button data-tab="baru">Wajah baru<span class="bil" id="bil-baru" hidden></span></button>
-      <button data-tab="orang">Orang berdaftar</button>
-      <button data-tab="log">Log &amp; video</button>
-      <button data-tab="langsung">Langsung</button>
+      <button data-tab="rumah" class="aktif"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/><path d="M10 20v-5h4v5"/></svg><span>Di rumah</span></button>
+      <button data-tab="baru"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="8" r="4"/><path d="M3 20c0-3.5 3-6 7-6 1.3 0 2.5.3 3.5.7"/><path d="M18 14v6M15 17h6"/></svg><span>Wajah baru</span><span class="bil" id="bil-baru" hidden></span></button>
+      <button data-tab="orang"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.3 2.9-5.5 6.5-5.5s6.5 2.2 6.5 5.5"/><circle cx="17" cy="9" r="2.8"/><path d="M17 14.5c2.6.3 4.5 2.2 4.5 4.8"/></svg><span>Orang berdaftar</span></button>
+      <button data-tab="log"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="m10 9.5 4.5 2.5-4.5 2.5z"/></svg><span>Log &amp; video</span></button>
+      <button data-tab="langsung"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2.5"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4M4.9 4.9a10 10 0 0 0 0 14.2M19.1 4.9a10 10 0 0 1 0 14.2"/></svg><span>Langsung</span></button>
     </nav>
   </div>
 </header>
@@ -179,7 +268,7 @@
   </section>
 
   <section id="t-orang" hidden>
-    <div class="kad status">
+    <div class="kad kad-notif">
       <div><b>Notifikasi</b><div class="pudar" id="saluran">-</div></div>
       <button class="btn" id="btn-uji">Hantar ujian</button>
       <div class="wa" id="wa" hidden></div>
@@ -288,6 +377,7 @@
   <button class="btn" id="btn-batal-pilih">Batal</button>
   <button class="btn utama" id="btn-gabung">Gabungkan</button>
 </div>
+<footer>CCTV Rumah · data disimpan dalam rumah anda sahaja</footer>
 <div id="toast"></div>
 
 <script>
@@ -327,12 +417,18 @@ function sibuk() {
   return [...document.querySelectorAll('#senarai-baru input[type=text]')].some(i => i.value.trim());
 }
 
+function statusSistem(ok) {
+  const el = $('#status-sistem');
+  el.classList.toggle('putus', !ok);
+  el.querySelector('.teks').textContent = ok ? 'Aktif' : 'Terputus';
+}
 async function muat(paksa = false) {
   if (!paksa && sibuk()) return;
   try {
     data = await (await fetch('/api/data', { cache: 'no-store' })).json();
+    statusSistem(true);
     lukis();
-  } catch (e) { toast('Tak dapat sambung ke sistem'); }
+  } catch (e) { statusSistem(false); toast('Tak dapat sambung ke sistem'); }
 }
 
 function lukis() {
@@ -344,7 +440,7 @@ function lukis() {
     : 'Belum disetkan. Lihat README untuk sambung WhatsApp.';
   $('#btn-uji').disabled = !(data.saluran && data.saluran.length);
   lukisWA(data.whatsapp);
-  $('#versi').textContent = data.versi ? 'v' + data.versi : '';
+  $('#versi').textContent = data.versi ? ' · v' + data.versi : '';
   lukisRumah(); lukisBaru(); lukisOrang(); lukisLog(); lukisZonStatus();
 }
 
@@ -426,7 +522,7 @@ function lukisOrang() {
       </div></div>`).join('');
 }
 
-let klipTerakhir = '';
+let klipTerakhir = null;
 function lukisKlip() {
   const kunci = (data.klip || []).map(k => k.url).join('|');
   if (kunci === klipTerakhir) return;  // jangan ganggu video yang sedang dimainkan

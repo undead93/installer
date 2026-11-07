@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CCTV kenal orang - pengecaman wajah untuk CCTV / IP camera / webcam, dengan page web.
+"""CCTV Rumah - pengecaman wajah untuk CCTV / IP camera / webcam, dengan page web.
 
 Guna OpenCV sahaja (YuNet untuk kesan wajah, SFace untuk kenal wajah).
 
@@ -66,7 +66,7 @@ MIRRORS = [
     "https://media.githubusercontent.com/media/opencv/opencv_zoo/main/",
 ]
 IMG_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
-VERSI = "2026.11.07j"  # dipaparkan dalam terminal & page web, untuk sahkan versi yang sedang berjalan
+VERSI = "2026.11.07k"  # dipaparkan dalam terminal & page web, untuk sahkan versi yang sedang berjalan
 DETECT_WIDTH = 1280  # bingkai besar dikecilkan ke lebar ini untuk kesan wajah (640 terlepas wajah <~135px pada 2K)
 NAMA_SAH = re.compile(r"^[\w][\w .'-]{0,39}$")
 
@@ -1140,7 +1140,7 @@ class Stor:
             return balas or [{"teks": "Tiada gambar kamera buat masa ini."}]
         if re.match(r"^(menu|bantuan|help|arahan|hi|hai|helo|hello)\b", t) or not kumpulan:
             kam = ", ".join(self.kamera) or "-"
-            return [{"teks": "🤖 *CCTV Kenal Orang* – arahan:\n"
+            return [{"teks": "🤖 *CCTV Rumah* – arahan:\n"
                              "• *siapa* – siapa di rumah sekarang\n"
                              "• *log* – masuk/keluar & siapa dikesan hari ini\n"
                              "• *log semalam* / *log 05/11* – log tarikh lain\n"
@@ -1201,7 +1201,7 @@ def sijil_sendiri():
     from datetime import timedelta, timezone
     d.mkdir(exist_ok=True)
     k = ec.generate_private_key(ec.SECP256R1())
-    nama = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "CCTV Kenal Orang")])
+    nama = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "CCTV Rumah")])
     alt = [x509.DNSName("localhost"), x509.IPAddress(ipaddress.ip_address("127.0.0.1"))]
     try:
         alt.append(x509.IPAddress(ipaddress.ip_address(ip_lan())))
@@ -1391,7 +1391,7 @@ def mula_web(stor, port, kata_laluan, port_https=0):
                 elif url.path == "/api/uji-maklum":
                     if not stor.notif or not stor.notif.saluran:
                         raise ValueError("Notifikasi belum disetkan. Set WHATSAPP_KE (lihat README).")
-                    ralat = stor.notif.hantar_segera("🔔 Ujian notifikasi dari CCTV Kenal Orang",
+                    ralat = stor.notif.hantar_segera("🔔 Ujian notifikasi dari CCTV Rumah",
                                                      stor.bingkai_terkini())
                     if ralat:
                         raise ValueError("Gagal: " + "; ".join(ralat))
@@ -1915,7 +1915,7 @@ def cmd_pantau(a):
     print(f"Had skor: kenal {a.ambang} | notifikasi {a.ambang_maklum} | kumpul wajah baru {a.ambang_kumpul}")
     stor = Stor(enjin, a.ambang, a.ambang_kumpul, a.maks_gambar, a.selang_simpan, a.saiz_min)
     stor.bersih(a.simpan_hari, a.simpan_klip_jam)
-    print(f"CCTV Kenal Orang versi {VERSI}")
+    print(f"CCTV Rumah versi {VERSI}")
     print(f"Orang berdaftar: {len(set(stor.nama))} ({', '.join(sorted(set(stor.nama))) or '-'})")
     print(f"Kumpulan wajah belum dinamakan: {len(stor.kumpulan)}")
 
@@ -2272,7 +2272,7 @@ def cmd_pantau(a):
                                              (img.shape[1], img.shape[0]))
             kk.penulis.write(img)
         if a.papar:
-            cv2.imshow(f"CCTV kenal orang - {kk.nama}", img)
+            cv2.imshow(f"CCTV Rumah - {kk.nama}", img)
 
     t_bersih = 0.0
     print("Memantau... tekan Ctrl+C (atau 'q' dalam tetingkap) untuk berhenti.")
@@ -2329,7 +2329,7 @@ def main():
             strim.reconfigure(encoding="utf-8", errors="replace")
         except (AttributeError, ValueError):
             pass
-    p = argparse.ArgumentParser(description="CCTV kenal orang")
+    p = argparse.ArgumentParser(description="CCTV Rumah")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     d = sub.add_parser("daftar", help="proses gambar dalam orang/<nama>/ (yang anda letak sendiri)")

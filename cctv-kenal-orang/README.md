@@ -1,4 +1,4 @@
-# CCTV Kenal Orang
+# CCTV Rumah
 
 Sistem ini mengenal wajah orang dalam video CCTV (Tapo, Hikvision, Dahua dan lain-lain), IP camera atau webcam.
 Ia juga ada **page web** yang boleh dibuka dari telefon untuk menamakan orang.
