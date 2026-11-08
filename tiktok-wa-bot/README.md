@@ -176,6 +176,23 @@ Privasi video ikut setting default akaun TikTok anda (biasanya **Everyone**).
 
 ---
 
+## Optimum video automatik
+
+Sebelum upload, bot semak fail dan optimumkan kalau perlu:
+
+| Fail asal | Apa bot buat |
+|---|---|
+| HEVC / H.265 (iPhone "High Efficiency") | Tukar ke **H.264** |
+| HDR / Dolby Vision (iPhone) | Tukar ke **SDR**, supaya warna tak pudar dan tak pecah |
+| 4K / 1440p | Kecilkan ke **1080p** (lanczos) |
+| Lebih 60fps | Tukar ke **60fps** |
+| Tiada audio | Tambah **trek audio senyap** |
+| Dah H.264 1080p SDR | **Tak diubah langsung** (tiada encode semula) |
+
+Encode semula guna H.264 High, CRF 17, dengan siling bitrate **12 Mbps** (`MAX_BITRATE_MBPS`). Bot balas dalam WhatsApp dengan maklumat fail asal dan fail siap. Untuk matikan, set `OPTIMIZE_VIDEO=false`.
+
+TikTok tetap akan mampat semula video selepas upload. Itu di luar kawalan bot, tapi fail yang elok (1080p H.264, terang, tak bergegar) biasanya keluar lebih tajam.
+
 ## Arahan berguna di VPS
 
 | Nak buat apa | Arahan |
