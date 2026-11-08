@@ -102,7 +102,7 @@ export function clearCookies() {
 
 // ---------- Browser ----------
 
-async function withPage(fn, { useCookies = true } = {}) {
+async function withPage(fn, { useCookies = true, scale = 1 } = {}) {
   const cookies = useCookies ? readJson(COOKIE_FILE, []) : []
   if (useCookies && !cookies.length) throw new WebUploadError('Belum ada login TikTok. Taip !loginqr (disyorkan) atau hantar !cookies <JSON>.')
 
@@ -114,6 +114,7 @@ async function withPage(fn, { useCookies = true } = {}) {
     const context = await browser.newContext({
       userAgent: UA,
       viewport: { width: 1366, height: 900 },
+      deviceScaleFactor: scale,
       locale: 'en-US',
       timezoneId: config.web.timezone,
     })
@@ -227,22 +228,26 @@ export async function checkLogin() {
  * Login guna QR code dalam browser bot sendiri (session dicipta di VPS, jadi TikTok tak tolak).
  * onQr(fail) dipanggil setiap kali QR baru sedia untuk discan.
  */
-export async function loginWithQr({ onQr, timeoutMs = 180_000 }) {
+export async function loginWithQr({ onQr, onStatus, timeoutMs = 180_000 }) {
+  const pageText = (page) => page.evaluate(() => document.body?.innerText?.slice(0, 3000) || '').catch(() => '')
   return withPage(
     async (page) => {
       await page.goto(`${ORIGIN}/login/qrcode`, { waitUntil: 'domcontentloaded', timeout: 90_000 })
       await page.waitForTimeout(5000)
       await dismissCookieBanner(page)
       await failIfCaptcha(page)
-      await onQr(await screenshot(page))
+      await onQr(await qrScreenshot(page))
 
       const deadline = Date.now() + timeoutMs
       let refreshes = 0
+      let lastText = await pageText(page)
+      let updates = 0
       while (Date.now() < deadline) {
         await page.waitForTimeout(2500)
         if (await hasSessionCookie(page)) {
           await page.waitForTimeout(4000) // biar TikTok habis set semua cookies
           const status = await accountStatus(page)
+          await onStatus?.(await screenshot(page).catch(() => null), '✅ Page TikTok selepas login')
           writeJson(COOKIE_FILE, await page.context().cookies(ORIGIN))
           return { account: status.loggedIn ? status.text : null }
         }
@@ -252,13 +257,42 @@ export async function loginWithQr({ onQr, timeoutMs = 180_000 }) {
           await page.reload({ waitUntil: 'domcontentloaded' })
           await page.waitForTimeout(5000)
           await dismissCookieBanner(page)
-          await onQr(await screenshot(page))
+          await onQr(await qrScreenshot(page))
+          lastText = await pageText(page)
+          continue
+        }
+        // Hantar screenshot bila page berubah (cth selepas QR discan: "confirm on your phone")
+        const text = await pageText(page)
+        if (text && text !== lastText && updates < 5) {
+          lastText = text
+          updates++
+          await onStatus?.(await screenshot(page).catch(() => null), '👀 Page TikTok berubah:')
         }
       }
       throw new WebUploadError('Masa tamat, QR tak discan. Taip !loginqr untuk cuba lagi.')
     },
-    { useCookies: false },
+    { useCookies: false, scale: 2 },
   )
+}
+
+/** Screenshot QR code sahaja (besar & jelas). Kalau tak jumpa, screenshot satu page. */
+async function qrScreenshot(page) {
+  const candidates = page.locator('canvas, img[src^="data:image"], img[alt*="qr" i], [data-e2e*="qr" i]')
+  const n = await candidates.count().catch(() => 0)
+  for (let i = 0; i < n; i++) {
+    const el = candidates.nth(i)
+    const box = await el.boundingBox().catch(() => null)
+    if (box && box.width >= 100 && box.height >= 100 && Math.abs(box.width - box.height) < 40) {
+      const pad = 24
+      const file = path.join(config.downloadDir, `qr-${Date.now()}.png`)
+      await page.screenshot({
+        path: file,
+        clip: { x: Math.max(0, box.x - pad), y: Math.max(0, box.y - pad), width: box.width + pad * 2, height: box.height + pad * 2 },
+      })
+      return file
+    }
+  }
+  return screenshot(page)
 }
 
 async function typeCaption(page, caption) {

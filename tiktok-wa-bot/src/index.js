@@ -140,6 +140,8 @@ function enqueue(task) {
   return position
 }
 
+let qrLoginRunning = false
+
 // ---------- Kebenaran ----------
 const warnedJids = new Set()
 function senderNumbers(key) {
@@ -353,23 +355,30 @@ async function handleCommand(text, reply, sendShot) {
     }
 
     case '!loginqr': {
+      if (qrLoginRunning) return reply('⏳ QR login sedang berjalan. Scan QR yang bot hantar tadi (atau tunggu ia tamat, kemudian cuba lagi).')
+      qrLoginRunning = true
       const position = enqueue(async () => {
         try {
           const res = await loginWithQr({
             onQr: (file) =>
               sendShot(
                 file,
-                '📱 Scan QR ini guna app TikTok:\n' +
-                  '1. Simpan gambar ni ke galeri (atau buka WhatsApp ni di PC dan scan dari skrin PC)\n' +
-                  '2. App TikTok → Profile → ☰ / ikon scan (atau Search → ikon scan)\n' +
-                  '3. Kalau dari galeri: tekan *Album/Photos* dalam scanner, pilih gambar ni\n' +
-                  '4. Tekan *Confirm/Log in* dalam app TikTok\n\nAnda ada lebih kurang 3 minit.',
+                '📱 Scan QR ini guna app TikTok (ada ~3 minit):\n\n' +
+                  '*Cara 1 (paling senang):* buka WhatsApp ni di PC (web.whatsapp.com), kemudian scan QR di skrin PC guna app TikTok.\n\n' +
+                  '*Cara 2 (telefon sahaja):*\n' +
+                  '1. Tekan gambar ni → Save (simpan ke Photos)\n' +
+                  '2. App TikTok → tekan 🔍 Search → ikon scan di sebelah kanan kotak search\n' +
+                  '3. Tekan *Photos/Album* → pilih gambar QR ni\n' +
+                  '4. Tekan *Confirm / Log in*',
               ),
+            onStatus: (file, caption) => sendShot(file, caption),
           })
           await reply(`✅ Login TikTok berjaya${res.account ? ` (${res.account})` : ''}! Taip !semak untuk uji, kemudian hantar video.`)
         } catch (e) {
           await reply(`❌ ${e.message}`)
           await sendShot(e.screenshot, 'Screenshot semasa ralat')
+        } finally {
+          qrLoginRunning = false
         }
       })
       return reply(position > 1 ? `⏳ Dalam giliran (#${position}).` : '⏳ Sedang buka page login TikTok, tunggu QR code...')
