@@ -53,7 +53,7 @@ curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 sudo apt-get install -y nodejs ffmpeg git
 
 # Ambil kod
-git clone https://github.com/undead93/installer.git
+git clone -b claude/sweet-bohr-89rl7v https://github.com/undead93/installer.git
 cd installer/tiktok-wa-bot
 npm install
 
