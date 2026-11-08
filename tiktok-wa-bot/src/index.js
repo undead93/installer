@@ -166,6 +166,8 @@ async function start() {
     auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, logger) },
     markOnlineOnConnect: false,
     syncFullHistory: false,
+    // Bot tak perlukan profil/privacy/blocklist; elak ralat "Timed Out" dalam 'init queries'
+    fireInitQueries: false,
   })
 
   sock.ev.on('creds.update', saveCreds)
