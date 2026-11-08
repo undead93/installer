@@ -31,7 +31,7 @@ import {
   queryCreatorInfo,
   waitForPublish,
 } from './tiktok.js'
-import { WebUploadError, checkLogin, clearCookies, hasCookies, saveCookies, uploadVideo } from './tiktok-web.js'
+import { WebUploadError, checkLogin, clearCookies, hasCookies, loginWithQr, saveCookies, uploadVideo } from './tiktok-web.js'
 import { convertTo60, probe } from './video.js'
 
 checkConfig()
@@ -63,6 +63,7 @@ const HELP_HEAD = `🤖 *Bot TikTok*
 *Arahan:*`
 
 const HELP_WEB = `${HELP_HEAD}
+• !loginqr – login TikTok guna QR code (disyorkan)
 • !sessionid <nilai> – login TikTok guna cookie sessionid
 • !cookies <JSON> – login guna JSON dari Cookie-Editor (atau hantar fail .json dengan caption !cookies)
 • !semak – semak login TikTok (bot hantar screenshot)
@@ -124,7 +125,7 @@ function isSelfChat(sock, jid) {
   return [sock.user?.id, sock.user?.lid].filter(Boolean).some((j) => jidDecode(j)?.user === target)
 }
 const API_ONLY = ['!login', '!kod', '!code', '!mod', '!mode', '!privasi', '!privacy']
-const WEB_ONLY = ['!sessionid', '!cookies', '!semak']
+const WEB_ONLY = ['!sessionid', '!cookies', '!semak', '!loginqr']
 
 // ---------- Giliran (satu upload pada satu masa) ----------
 let queue = Promise.resolve()
@@ -351,12 +352,35 @@ async function handleCommand(text, reply, sendShot) {
       }
     }
 
+    case '!loginqr': {
+      const position = enqueue(async () => {
+        try {
+          const res = await loginWithQr({
+            onQr: (file) =>
+              sendShot(
+                file,
+                '📱 Scan QR ini guna app TikTok:\n' +
+                  '1. Simpan gambar ni ke galeri (atau buka WhatsApp ni di PC dan scan dari skrin PC)\n' +
+                  '2. App TikTok → Profile → ☰ / ikon scan (atau Search → ikon scan)\n' +
+                  '3. Kalau dari galeri: tekan *Album/Photos* dalam scanner, pilih gambar ni\n' +
+                  '4. Tekan *Confirm/Log in* dalam app TikTok\n\nAnda ada lebih kurang 3 minit.',
+              ),
+          })
+          await reply(`✅ Login TikTok berjaya${res.account ? ` (${res.account})` : ''}! Taip !semak untuk uji, kemudian hantar video.`)
+        } catch (e) {
+          await reply(`❌ ${e.message}`)
+          await sendShot(e.screenshot, 'Screenshot semasa ralat')
+        }
+      })
+      return reply(position > 1 ? `⏳ Dalam giliran (#${position}).` : '⏳ Sedang buka page login TikTok, tunggu QR code...')
+    }
+
     case '!semak': {
-      if (!hasCookies()) return reply('❌ Belum login. Hantar !sessionid <nilai> dulu.')
+      if (!hasCookies()) return reply('❌ Belum login. Taip !loginqr dulu.')
       const position = enqueue(async () => {
         try {
           const res = await checkLogin()
-          await reply(res.ok ? '✅ Login TikTok OK, page upload dapat dibuka.' : '⚠️ Page upload dibuka tapi butang upload tak jumpa. Tengok screenshot.')
+          await reply(res.ok ? `✅ Login TikTok OK (${res.info}), page upload dapat dibuka.` : `⚠️ Page upload dibuka tapi butang upload tak jumpa (${res.info}). Tengok screenshot.`)
           await sendShot(res.screenshot, 'Screenshot page upload TikTok')
         } catch (e) {
           await reply(`❌ ${e.message}`)
@@ -371,7 +395,7 @@ async function handleCommand(text, reply, sendShot) {
         return reply(
           [
             'Kaedah: *web* (upload melalui tiktok.com)',
-            `TikTok: ${hasCookies() ? '✅ cookies ada (taip !semak untuk uji)' : '❌ belum login (hantar !sessionid)'}`,
+            `TikTok: ${hasCookies() ? '✅ cookies ada (taip !semak untuk uji)' : '❌ belum login (taip !loginqr)'}`,
             `Auto tukar 60fps: ${config.video.autoConvert60 ? 'ON' : 'OFF'}`,
             `Video dalam giliran: ${queued}`,
           ].join('\n'),
@@ -449,7 +473,7 @@ async function handleVideo(sock, msg, { doc, vid, reply, sendShot, send }) {
   const settings = getSettings()
 
   if (config.method === 'web') {
-    if (!hasCookies()) return reply('❌ Belum login TikTok. Hantar !sessionid <nilai> dulu.')
+    if (!hasCookies()) return reply('❌ Belum login TikTok. Taip !loginqr dulu.')
   } else {
     if (missingTikTokConfig().length) return reply('❌ Key TikTok belum diisi dalam .env di VPS. Isi dulu, kemudian !login.')
     const token = getTokenInfo()

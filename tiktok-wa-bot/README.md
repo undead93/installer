@@ -93,7 +93,18 @@ pm2 startup      # copy & jalankan arahan yang dipaparkan
 
 Bot login TikTok guna cookie **`sessionid`** dari browser yang dah login TikTok.
 
-### Cara utama: Export SEMUA cookies (disyorkan)
+### Cara utama: `!loginqr` (disyorkan)
+TikTok selalunya **tolak cookies dari PC bila dipakai di VPS**, sebab IP dan browser berbeza. Jadi cara terbaik ialah login terus dalam browser bot:
+1. Hantar `!loginqr`. Bot akan hantar gambar QR code.
+2. Scan QR tu dengan **app TikTok**:
+   - Buka WhatsApp di PC dan scan QR dari skrin PC guna telefon, **atau**
+   - Simpan gambar QR ke galeri, kemudian dalam app TikTok buka ikon **scan**, tekan **Album/Photos** dan pilih gambar tu.
+3. Tekan **Confirm / Log in** dalam app TikTok.
+4. Bot akan balas `✅ Login TikTok berjaya`. Lepas tu hantar `!semak`.
+
+QR tamat dalam masa lebih kurang 3 minit. Kalau tamat, hantar `!loginqr` sekali lagi.
+
+### Cara alternatif: Export SEMUA cookies
 TikTok kadang-kadang tak terima `sessionid` seorang diri, jadi lebih baik hantar semua cookies.
 1. Di PC, install extension **Cookie-Editor** dalam Chrome atau Edge.
 2. Buka **tiktok.com** (pastikan dah login), tekan ikon Cookie-Editor, kemudian **Export → JSON** (atau **Header String**). Ia akan disalin secara automatik.
@@ -153,7 +164,8 @@ Bot akan muat turun video, tukar fps kalau perlu, buka TikTok, upload, isi capti
 
 | Arahan | Fungsi |
 |---|---|
-| `!sessionid <nilai>` | Login TikTok |
+| `!loginqr` | Login TikTok guna QR code (disyorkan) |
+| `!sessionid <nilai>` | Login TikTok guna sessionid |
 | `!cookies <JSON>` | Login guna JSON dari Cookie-Editor |
 | `!semak` | Uji login (bot hantar screenshot) |
 | `!status` | Status bot |

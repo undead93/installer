@@ -8,6 +8,7 @@ import { readJson, writeJson } from './store.js'
 
 const COOKIE_FILE = 'tiktok-cookies.json'
 const UPLOAD_URL = process.env.TIKTOK_UPLOAD_URL || 'https://www.tiktok.com/tiktokstudio/upload?from=webapp'
+const ORIGIN = new URL(UPLOAD_URL).origin
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'
 
@@ -101,9 +102,9 @@ export function clearCookies() {
 
 // ---------- Browser ----------
 
-async function withPage(fn) {
-  const cookies = readJson(COOKIE_FILE, [])
-  if (!cookies.length) throw new WebUploadError('Belum ada login TikTok. Hantar !sessionid <nilai> dulu.')
+async function withPage(fn, { useCookies = true } = {}) {
+  const cookies = useCookies ? readJson(COOKIE_FILE, []) : []
+  if (useCookies && !cookies.length) throw new WebUploadError('Belum ada login TikTok. Taip !loginqr (disyorkan) atau hantar !cookies <JSON>.')
 
   const browser = await chromium.launch({
     headless: config.web.headless,
@@ -119,7 +120,7 @@ async function withPage(fn) {
     await context.addInitScript(() => {
       Object.defineProperty(navigator, 'webdriver', { get: () => undefined })
     })
-    await context.addCookies(cookies)
+    if (cookies.length) await context.addCookies(cookies)
     const page = await context.newPage()
     page.setDefaultTimeout(60_000)
     try {
@@ -133,7 +134,7 @@ async function withPage(fn) {
       throw new WebUploadError(e.message.split('\n')[0], shot)
     } finally {
       // Simpan cookies terkini (TikTok kadang-kadang refresh session)
-      const fresh = await context.cookies('https://www.tiktok.com').catch(() => [])
+      const fresh = await context.cookies(ORIGIN).catch(() => [])
       if (fresh.some((c) => c.name === 'sessionid')) writeJson(COOKIE_FILE, fresh)
     }
   } finally {
@@ -154,7 +155,7 @@ async function dismissCookieBanner(page) {
 
 async function openUploadPage(page) {
   // Buka laman utama dulu supaya TikTok set cookie asas (ttwid, msToken) macam browser biasa
-  await page.goto(`${new URL(UPLOAD_URL).origin}/`, { waitUntil: 'domcontentloaded', timeout: 90_000 }).catch(() => {})
+  await page.goto(`${ORIGIN}/`, { waitUntil: 'domcontentloaded', timeout: 90_000 }).catch(() => {})
   await page.waitForTimeout(4000)
   await dismissCookieBanner(page)
 
@@ -180,13 +181,84 @@ async function failIfCaptcha(page) {
 }
 
 /** Semak login: buka page upload dan ambil screenshot. */
+const ACCOUNT_INFO_URL = `${ORIGIN}/passport/web/account/info/?aid=1459&app_language=en&app_name=tiktok_web`
+
+/** Tanya TikTok terus: session ni masih login atau tidak. Pulangkan teks ringkas untuk diagnostik. */
+async function accountStatus(page) {
+  try {
+    const res = await page.request.get(ACCOUNT_INFO_URL, { timeout: 20_000 })
+    const json = await res.json().catch(() => null)
+    const user = json?.data?.username || json?.data?.screen_name
+    if (user) return { loggedIn: true, text: `akaun @${user}` }
+    const why = json?.data?.description || json?.data?.error_code || json?.message || `HTTP ${res.status()}`
+    return { loggedIn: false, text: `TikTok kata: ${why}` }
+  } catch (e) {
+    return { loggedIn: null, text: `tak dapat semak (${e.message.split('\n')[0]})` }
+  }
+}
+
+async function hasSessionCookie(page) {
+  const list = await page.context().cookies(ORIGIN)
+  return list.some((c) => c.name === 'sessionid' && c.value)
+}
+
+/** Semak login: buka page upload, ambil screenshot, dan bagi maklumat diagnostik. */
 export async function checkLogin() {
   return withPage(async (page) => {
-    await openUploadPage(page)
+    const loaded = readJson(COOKIE_FILE, []).length
+    const before = await accountStatus(page)
+    try {
+      await openUploadPage(page)
+    } catch (e) {
+      const kept = await hasSessionCookie(page).catch(() => null)
+      e.message +=
+        `\n\n🔎 Diagnostik:\n• Cookies dimuat: ${loaded}\n• Status session (sebelum buka page): ${before.text}` +
+        `\n• sessionid selepas buka page: ${kept ? 'masih ada' : 'DIPADAM oleh TikTok'}` +
+        '\n\n💡 Cuba !loginqr: login terus dalam browser bot guna QR code.'
+      throw e
+    }
     const input = page.locator('input[type="file"]').first()
     const ok = await input.waitFor({ state: 'attached', timeout: 45_000 }).then(() => true, () => false)
-    return { ok, screenshot: await screenshot(page).catch(() => null) }
+    return { ok, info: before.text, screenshot: await screenshot(page).catch(() => null) }
   })
+}
+
+/**
+ * Login guna QR code dalam browser bot sendiri (session dicipta di VPS, jadi TikTok tak tolak).
+ * onQr(fail) dipanggil setiap kali QR baru sedia untuk discan.
+ */
+export async function loginWithQr({ onQr, timeoutMs = 180_000 }) {
+  return withPage(
+    async (page) => {
+      await page.goto(`${ORIGIN}/login/qrcode`, { waitUntil: 'domcontentloaded', timeout: 90_000 })
+      await page.waitForTimeout(5000)
+      await dismissCookieBanner(page)
+      await failIfCaptcha(page)
+      await onQr(await screenshot(page))
+
+      const deadline = Date.now() + timeoutMs
+      let refreshes = 0
+      while (Date.now() < deadline) {
+        await page.waitForTimeout(2500)
+        if (await hasSessionCookie(page)) {
+          await page.waitForTimeout(4000) // biar TikTok habis set semua cookies
+          const status = await accountStatus(page)
+          writeJson(COOKIE_FILE, await page.context().cookies(ORIGIN))
+          return { account: status.loggedIn ? status.text : null }
+        }
+        const expired = await page.getByText(/QR code (has )?expired|kod QR (telah )?tamat/i).first().isVisible().catch(() => false)
+        if (expired) {
+          if (++refreshes > 2) break
+          await page.reload({ waitUntil: 'domcontentloaded' })
+          await page.waitForTimeout(5000)
+          await dismissCookieBanner(page)
+          await onQr(await screenshot(page))
+        }
+      }
+      throw new WebUploadError('Masa tamat, QR tak discan. Taip !loginqr untuk cuba lagi.')
+    },
+    { useCookies: false },
+  )
 }
 
 async function typeCaption(page, caption) {
