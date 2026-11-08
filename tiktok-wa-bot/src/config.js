@@ -15,6 +15,16 @@ export const config = {
   // Kalau diisi, bot login guna "pairing code" (tak perlu scan QR). Nombor WhatsApp BOT.
   pairingNumber: (process.env.WA_PAIRING_NUMBER || '').replace(/\D/g, ''),
 
+  // web = upload melalui tiktok.com guna browser automatik (tak perlu developer)
+  // api = TikTok Content Posting API rasmi (perlu app TikTok for Developers)
+  method: (process.env.TIKTOK_METHOD || 'web').toLowerCase(),
+
+  web: {
+    headless: (process.env.BROWSER_HEADLESS || 'true').toLowerCase() !== 'false',
+    uploadTimeoutMin: Number(process.env.UPLOAD_TIMEOUT_MIN || 15),
+    timezone: process.env.TZ_BROWSER || 'Asia/Kuala_Lumpur',
+  },
+
   tiktok: {
     clientKey: process.env.TIKTOK_CLIENT_KEY || '',
     clientSecret: process.env.TIKTOK_CLIENT_SECRET || '',
@@ -46,7 +56,11 @@ export function checkConfig() {
     console.error('❌ Sila isi ALLOWED_NUMBERS dalam fail .env')
     process.exit(1)
   }
-  const missing = missingTikTokConfig()
+  if (!['web', 'api'].includes(config.method)) {
+    console.error('❌ TIKTOK_METHOD mesti "web" atau "api"')
+    process.exit(1)
+  }
+  const missing = config.method === 'api' ? missingTikTokConfig() : []
   if (missing.length) {
     // WhatsApp masih boleh di-link dulu; TikTok boleh disambung kemudian
     console.warn(`⚠️ Belum isi dalam .env: ${missing.join(', ')}. Bot boleh link WhatsApp dulu, tapi TikTok belum boleh digunakan.`)

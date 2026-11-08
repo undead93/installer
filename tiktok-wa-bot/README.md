@@ -1,165 +1,180 @@
 # Bot WhatsApp → TikTok
 
-Hantar video ke nombor WhatsApp bot sebagai **Document** dan tulis caption. Bot akan terus post video tu ke TikTok guna API rasmi TikTok (Content Posting API).
+Hantar video ke nombor WhatsApp bot sebagai **Document** dan tulis caption. Bot akan terus post video tu ke TikTok.
 
 ```
-Anda (WhatsApp) ──📎 Document + caption──▶ Bot (VPS) ──API rasmi──▶ TikTok
+Anda (WhatsApp) ──📎 Document + caption──▶ Bot (VPS) ──▶ TikTok
 ```
 
-**Kenapa Document?** WhatsApp tak compress fail yang dihantar sebagai Document, jadi video sampai ke TikTok dalam kualiti asal. Kalau hantar melalui Gallery, WhatsApp akan compress dulu.
+Bot ada dua kaedah upload (tetapkan dengan `TIKTOK_METHOD` dalam `.env`):
 
-**Kenapa 60fps?** TikTok maksimum 60fps. Kalau video anda 120fps, bot tukar automatik ke 60fps kualiti tinggi (guna ffmpeg) sebelum upload.
+| | **web** (default) | **api** |
+|---|---|---|
+| Cara | Bot buka tiktok.com guna browser automatik, sama macam upload guna Edge di PC | API rasmi TikTok |
+| Perlu akaun developer? | ❌ Tak perlu | ✅ Perlu |
+| Boleh terus public? | ✅ Ya | Hanya selepas app lulus audit TikTok |
+| Risiko | Bukan cara rasmi: akaun boleh kena flag atau captcha, dan bot boleh rosak bila TikTok tukar design website | Selamat |
 
-> ⚠️ **Baileys bukan API rasmi WhatsApp.** Ada risiko nombor kena ban. **Guna nombor kedua** untuk bot, jangan nombor utama.
+**Kenapa Document?** WhatsApp tak compress fail Document, jadi video sampai dalam kualiti asal.
+**Kenapa 60fps?** TikTok maksimum 60fps. Video 120fps akan ditukar automatik ke 60fps kualiti tinggi.
 
----
-
-## Apa yang anda perlukan
-
-1. **VPS** dengan Ubuntu 22.04/24.04, RAM 1GB ke atas (2GB lebih selesa kalau selalu tukar 120fps).
-2. **Nombor WhatsApp kedua** untuk bot (dalam telefon lain, atau WhatsApp Business dalam telefon yang sama).
-3. **Akaun TikTok for Developers** (percuma).
-4. **URL https** untuk redirect login TikTok. Cara paling senang ialah GitHub Pages percuma (`https://username.github.io/`).
-
----
-
-## Langkah 1: Buat app TikTok
-
-1. Pergi ke **developers.tiktok.com**, login dan buka **Manage apps**, kemudian **Connect an app**.
-2. Isi maklumat app (nama, ikon, kategori, Terms of Service URL dan Privacy Policy URL; boleh guna page GitHub Pages anda).
-3. Platform: pilih **Web**.
-4. Tambah product:
-   - **Login Kit**: masukkan **Redirect URI** anda, contoh `https://username.github.io/`
-   - **Content Posting API**: hidupkan **Direct Post**
-5. Scope yang perlu ada: `user.info.basic`, `video.publish` (dan `video.upload` kalau nak guna mod draft).
-6. Salin **Client key** dan **Client secret**.
-7. Sebelum app diluluskan, guna **Sandbox** dan tambah akaun TikTok anda sebagai *target user*.
-
-### Tentang audit TikTok
-
-- App yang **belum lulus audit** hanya boleh post sebagai **private (Only me)**, dan TikTok mungkin minta akaun anda ditetapkan private semasa ujian.
-- Untuk post **public**, hantar app untuk audit di portal TikTok.
-- Sementara menunggu audit, guna **mod draft** (`!mod draft`). Video masuk ke inbox TikTok, lepas tu anda buka app TikTok dan tekan Post sendiri dengan pilihan public.
+> ⚠️ **Baileys bukan API rasmi WhatsApp**, jadi guna **nombor kedua** untuk bot.
+> ⚠️ **Kaedah web bukan cara rasmi TikTok.** Kalau boleh, uji dulu dengan akaun TikTok yang anda tak kisah sangat.
 
 ---
 
-## Langkah 2: Pasang di VPS
+## 1. Pasang di VPS (Ubuntu 22.04/24.04)
 
-SSH ke VPS (dari telefon boleh guna app **Termius** atau **JuiceSSH**), kemudian:
+RAM disyorkan **2GB** ke atas, sebab browser + ffmpeg agak berat. Kalau VPS cuma 1GB, buat swap (langkah 1b).
+
+SSH ke VPS (dari telefon boleh guna app **Termius**), kemudian:
 
 ```bash
 # Node.js 20 + ffmpeg + git
+sudo apt-get update
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 sudo apt-get install -y nodejs ffmpeg git
 
 # Ambil kod
+cd ~
 git clone -b claude/sweet-bohr-89rl7v https://github.com/undead93/installer.git
 cd installer/tiktok-wa-bot
 npm install
 
-# Setting
+# Pasang browser Chromium + library yang diperlukan
+npx playwright install --with-deps chromium
+```
+
+Kalau folder `installer` dah wujud dari cubaan sebelum ni:
+```bash
+cd ~/installer && git fetch origin claude/sweet-bohr-89rl7v && git checkout claude/sweet-bohr-89rl7v && git pull
+cd tiktok-wa-bot && npm install && npx playwright install --with-deps chromium
+```
+
+### 1b. (Untuk VPS 1GB) Buat swap 2GB
+```bash
+sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile
+sudo mkswap /swapfile && sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+```
+
+## 2. Setting
+
+```bash
 cp .env.example .env
 nano .env
 ```
 
-Isi dalam `.env`:
+Yang wajib diisi:
+```
+ALLOWED_NUMBERS=60123456789      ← nombor UTAMA anda (yang hantar video)
+WA_PAIRING_NUMBER=60198765432    ← nombor BOT (supaya tak perlu scan QR)
+TIKTOK_METHOD=web
+```
+Simpan dalam nano: **Ctrl+O → Enter → Ctrl+X**.
 
-| Setting | Isi dengan |
-|---|---|
-| `ALLOWED_NUMBERS` | Nombor **utama** anda (yang akan hantar video), contoh `60123456789` |
-| `WA_PAIRING_NUMBER` | Nombor **bot**, kalau tak nak scan QR (sesuai kalau guna telefon sahaja) |
-| `TIKTOK_CLIENT_KEY` / `TIKTOK_CLIENT_SECRET` | Dari app TikTok |
-| `TIKTOK_REDIRECT_URI` | **Sama persis** dengan dalam app TikTok |
-| `TIKTOK_PRIVACY` | `SELF_ONLY` dulu (sebelum audit) |
-
-Simpan dalam nano: `Ctrl+O`, `Enter`, kemudian `Ctrl+X`.
-
----
-
-## Langkah 3: Link WhatsApp bot
+## 3. Link WhatsApp bot
 
 ```bash
 npm start
 ```
+Tunggu sampai keluar `🔑 PAIRING CODE: XXXX-XXXX`. Dalam **telefon bot**, buka WhatsApp → **Linked devices** → **Link a device** → **Link with phone number instead**, kemudian masukkan kod tu.
 
-- **Kalau `WA_PAIRING_NUMBER` diisi:** terminal akan tunjuk `PAIRING CODE: XXXX-XXXX`. Dalam telefon **bot**, buka WhatsApp → **Linked devices** → **Link a device** → **Link with phone number instead**, kemudian masukkan kod tu.
-- **Kalau guna QR:** scan QR dalam terminal guna WhatsApp telefon **bot**.
-
-Bila keluar `✅ WhatsApp bersambung`, tekan `Ctrl+C` dan jalankan bot di background supaya hidup 24 jam:
+Bila keluar `✅ WhatsApp bersambung`, tekan **Ctrl+C**, kemudian jalankan bot 24 jam:
 
 ```bash
 sudo npm install -g pm2
 pm2 start ecosystem.config.cjs
 pm2 save
-pm2 startup        # ikut arahan yang dipaparkan, supaya bot hidup semula lepas VPS restart
+pm2 startup      # copy & jalankan arahan yang dipaparkan
 ```
 
-Untuk tengok log: `pm2 logs tiktok-wa-bot`
+## 4. Login TikTok (ambil `sessionid`)
 
----
+Bot login TikTok guna cookie **`sessionid`** dari browser yang dah login TikTok.
 
-## Langkah 4: Login TikTok (melalui WhatsApp)
+### Cara A: Dari PC/laptop (paling senang)
+1. Buka **Chrome** atau **Edge** dan login di **tiktok.com**.
+2. Tekan **F12**, pergi ke tab **Application** (dalam Edge: **Application** juga), kemudian **Cookies** → `https://www.tiktok.com`.
+3. Cari baris **`sessionid`** dan copy **Value**.
+4. Dari WhatsApp, hantar kepada bot:
+   ```
+   !sessionid nilai_yang_dicopy
+   ```
 
-Dari nombor utama anda, hantar mesej ke nombor bot:
+### Cara B: Dari telefon Android
+1. Install **Firefox** dari Play Store.
+2. Dalam Firefox, buka **Menu → Add-ons**, cari **Cookie-Editor** dan install.
+3. Buka **tiktok.com** dalam Firefox dan login.
+4. Buka **Menu → Add-ons → Cookie-Editor**, cari **`sessionid`** dan copy nilainya.
+5. Hantar `!sessionid nilai_tadi` kepada bot.
+   - Atau dalam Cookie-Editor tekan **Export → JSON**, kemudian hantar `!cookies <paste JSON>`. Boleh juga simpan sebagai fail `.json` dan hantar sebagai Document dengan caption `!cookies`.
 
-1. Hantar `!login`. Bot balas dengan satu link.
-2. Buka link tu, login TikTok dan tekan **Authorize**.
-3. Browser akan pergi ke Redirect URI anda. Page tu kosong atau error pun tak apa. **Copy link penuh** dari address bar.
-4. Hantar `!kod <link tadi>`.
-5. Bot balas `✅ TikTok bersambung`.
+### Lepas tu
+- Hantar **`!semak`**. Bot akan buka page upload TikTok dan hantar screenshot. Kalau nampak page upload, maknanya login berjaya ✅
+- 🔒 **Padam mesej sessionid** dari chat (Delete for everyone). Ia macam password.
+- ⚠️ **Jangan tekan Log out** dalam browser tempat anda ambil sessionid tu. Kalau log out, sessionid tu tak boleh guna lagi. Tutup browser sahaja.
+- Sessionid akan tamat selepas beberapa minggu atau bulan. Bila bot cakap login tamat, ambil sessionid baru.
 
-Login ni tahan lebih kurang setahun. Bot refresh token sendiri secara automatik.
+## 5. Cara guna
 
----
+📎 Dalam chat bot, tekan **Attach → Document**, pilih video, tulis caption (boleh letak #hashtag dan baris baru), dan hantar.
 
-## Cara guna
-
-📎 Dalam chat bot, tekan **Attach → Document**, pilih video, tulis caption (boleh letak #hashtag), dan hantar.
-
-Bot akan balas setiap peringkat: muat turun, tukar fps (kalau perlu), upload, kemudian **✅ Dah post**.
+Bot akan muat turun video, tukar fps kalau perlu, buka TikTok, upload, isi caption dan tekan Post, kemudian balas **✅ Dah post**. Kalau ada masalah, bot akan **hantar screenshot** page TikTok supaya anda nampak apa yang berlaku.
 
 | Arahan | Fungsi |
 |---|---|
+| `!sessionid <nilai>` | Login TikTok |
+| `!cookies <JSON>` | Login guna JSON dari Cookie-Editor |
+| `!semak` | Uji login (bot hantar screenshot) |
+| `!status` | Status bot |
+| `!logout` | Padam login TikTok dari bot |
 | `!bantuan` | Senarai arahan |
-| `!login` / `!kod <link>` | Sambung akaun TikTok |
-| `!status` | Status bot, akaun, privasi yang dibenarkan, durasi maksimum |
-| `!mod direct` | Terus post dengan caption |
-| `!mod draft` | Hantar ke inbox TikTok; anda tekan Post sendiri dalam app (bot hantar semula caption supaya senang copy) |
-| `!privasi public \| friends \| followers \| private` | Tukar privasi post |
-| `!logout` | Putuskan akaun TikTok |
+
+Privasi video ikut setting default akaun TikTok anda (biasanya **Everyone**).
 
 ---
 
-## Tips kualiti
+## Arahan berguna di VPS
 
-- Rakam pada **1080p 60fps**. Kalau rakam 120fps, bot tukar ke 60fps automatik.
-- Kalau edit dalam CapCut, export **1080p, 60fps, bitrate tinggi**.
-- **Selalu hantar sebagai Document**, bukan Gallery.
-- Fail sampai ke TikTok dalam kualiti asal, tapi TikTok tetap akan proses semula video tu. Itu di luar kawalan bot.
-
----
+| Nak buat apa | Arahan |
+|---|---|
+| Tengok log | `pm2 logs tiktok-wa-bot` |
+| Restart (lepas ubah `.env`) | `pm2 restart tiktok-wa-bot` |
+| Update kod bot | `cd ~/installer && git pull && cd tiktok-wa-bot && npm install && npx playwright install chromium && pm2 restart tiktok-wa-bot` |
+| Link semula WhatsApp | `pm2 stop tiktok-wa-bot && rm -rf data/wa-auth && npm start` |
 
 ## Masalah biasa
 
 | Masalah | Penyelesaian |
 |---|---|
-| Bot tak balas langsung | Tengok `pm2 logs`. Kalau ada `🚫 Mesej daripada ... diabaikan`, masukkan nombor atau ID yang ditunjuk ke dalam `ALLOWED_NUMBERS`, kemudian `pm2 restart tiktok-wa-bot` |
-| `unaudited_client...` | App belum lulus audit. Guna `!privasi private` atau `!mod draft` |
-| `redirect_uri` error | `TIKTOK_REDIRECT_URI` mesti sama persis dengan dalam app TikTok (termasuk `/` di hujung) |
-| `scope` error | Pastikan scope ada dalam app TikTok, kemudian `!login` semula |
-| WhatsApp logged out | `rm -rf data/wa-auth`, kemudian `npm start` dan link semula |
-| Tukar fps lambat | Tukar `FFMPEG_PRESET=medium` atau `fast` dalam `.env` |
+| Bot tak balas | `pm2 logs tiktok-wa-bot`. Kalau ada `🚫 Mesej daripada ... diabaikan`, masukkan nombor/ID tu dalam `ALLOWED_NUMBERS`, kemudian restart |
+| "Login TikTok dah tamat" | Ambil sessionid baru dan hantar `!sessionid` |
+| "TikTok minta captcha" | Login TikTok dalam browser biasa, selesaikan captcha di sana, dan tunggu sekejap sebelum cuba lagi. Jangan post terlalu kerap. |
+| "Tak jumpa butang upload" / "butang Post tak aktif" | Tengok screenshot yang bot hantar. Mungkin TikTok dah tukar design website, jadi kod bot perlu dikemas kini |
+| `browserType.launch: Executable doesn't exist` | Jalankan `npx playwright install --with-deps chromium` |
+| Bot crash / VPS jadi lambat | RAM tak cukup. Buat swap (langkah 1b) |
+| TikTok kesan headless browser | Cuba browser dengan skrin maya: `sudo apt-get install -y xvfb`, set `BROWSER_HEADLESS=false`, kemudian `pm2 delete tiktok-wa-bot && pm2 start "xvfb-run -a node src/index.js" --name tiktok-wa-bot && pm2 save` |
+
+---
+
+## Kaedah API rasmi (pilihan)
+
+Kalau nanti nak guna API rasmi TikTok, set `TIKTOK_METHOD=api` dan isi `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET` dan `TIKTOK_REDIRECT_URI` dalam `.env`.
+
+1. Buat app di **developers.tiktok.com**: platform **Web**, product **Login Kit** (dengan Redirect URI https) dan **Content Posting API** (Direct Post), scope `user.info.basic`, `video.publish` dan `video.upload`.
+2. Sebelum app lulus audit, hanya boleh post **private** (`TIKTOK_PRIVACY=SELF_ONLY`). Boleh juga guna `!mod draft` dan tekan Post sendiri dalam app TikTok.
+3. Arahan WhatsApp untuk kaedah ni: `!login`, `!kod <link>`, `!mod direct|draft`, `!privasi public|friends|followers|private`, `!status` dan `!logout`.
 
 ---
 
 ## Struktur fail
 
 ```
-src/index.js    – bot WhatsApp (Baileys), arahan & aliran upload
-src/tiktok.js   – OAuth TikTok + Content Posting API (upload berchunk)
-src/video.js    – ffprobe/ffmpeg: semak fps & tukar ke 60fps
-src/config.js   – baca .env
-src/store.js    – simpan token & setting dalam data/
+src/index.js       – bot WhatsApp (Baileys), arahan & aliran upload
+src/tiktok-web.js  – kaedah web: upload melalui tiktok.com guna Playwright
+src/tiktok.js      – kaedah api: OAuth TikTok + Content Posting API
+src/video.js       – ffprobe/ffmpeg: semak fps & tukar ke 60fps
+src/config.js      – baca .env
+src/store.js       – simpan token, cookies & setting dalam data/
 ```
-
-> Nota: Endpoint dan had API ditulis berdasarkan dokumentasi TikTok Content Posting API (v2). Kalau TikTok ubah API, semak semula di developers.tiktok.com.

@@ -30,6 +30,7 @@ import {
   queryCreatorInfo,
   waitForPublish,
 } from './tiktok.js'
+import { WebUploadError, checkLogin, clearCookies, hasCookies, saveCookies, uploadVideo } from './tiktok-web.js'
 import { convertTo60, probe } from './video.js'
 
 checkConfig()
@@ -53,12 +54,22 @@ const PRIVACY_ALIASES = {
   self: 'SELF_ONLY',
 }
 
-const HELP = `🤖 *Bot TikTok*
+const HELP_HEAD = `🤖 *Bot TikTok*
 
 *Cara post:*
 📎 Hantar video sebagai *Document* (bukan Gallery) + tulis caption → bot terus post.
 
-*Arahan:*
+*Arahan:*`
+
+const HELP_WEB = `${HELP_HEAD}
+• !sessionid <nilai> – login TikTok guna cookie sessionid
+• !cookies <JSON> – login guna JSON dari Cookie-Editor (atau hantar fail .json dengan caption !cookies)
+• !semak – semak login TikTok (bot hantar screenshot)
+• !status – tengok status bot
+• !logout – padam login TikTok dari bot
+• !bantuan – mesej ini`
+
+const HELP_API = `${HELP_HEAD}
 • !login – sambung akaun TikTok
 • !kod <link> – paste link selepas login
 • !status – tengok status bot & akaun
@@ -66,6 +77,10 @@ const HELP = `🤖 *Bot TikTok*
 • !privasi public | friends | followers | private
 • !logout – putuskan akaun TikTok
 • !bantuan – mesej ini`
+
+const HELP = config.method === 'web' ? HELP_WEB : HELP_API
+const API_ONLY = ['!login', '!kod', '!code', '!mod', '!mode', '!privasi', '!privacy']
+const WEB_ONLY = ['!sessionid', '!cookies', '!semak']
 
 // ---------- Giliran (satu upload pada satu masa) ----------
 let queue = Promise.resolve()
@@ -170,21 +185,45 @@ async function handleMessage(sock, msg) {
   const content = normalizeMessageContent(msg.message)
   if (!content) return
   const reply = (text) => sock.sendMessage(jid, { text }, { quoted: msg })
+  const sendShot = async (file, caption) => {
+    if (!file || !fs.existsSync(file)) return
+    await sock.sendMessage(jid, { image: fs.readFileSync(file), caption })
+    fs.rm(file, { force: true }, () => {})
+  }
 
   const doc = content.documentMessage
   const vid = content.videoMessage
-  if (doc || vid) return handleVideo(sock, msg, { doc, vid, reply })
+
+  // Fail cookies (.json/.txt) dengan caption !cookies
+  if (doc && /^!cookies/i.test((doc.caption || '').trim())) {
+    try {
+      const buf = await downloadMediaMessage(msg, 'buffer', {}, { logger, reuploadRequest: sock.updateMediaMessage })
+      const n = saveCookies(buf.toString('utf8'))
+      return reply(`✅ ${n} cookies disimpan. Taip !semak untuk pastikan login berjaya.`)
+    } catch (e) {
+      return reply(`❌ ${e.message}`)
+    }
+  }
+
+  if (doc || vid) return handleVideo(sock, msg, { doc, vid, reply, sendShot })
 
   const text = (content.conversation || content.extendedTextMessage?.text || '').trim()
-  if (text.startsWith('!')) return handleCommand(text, reply)
+  if (text.startsWith('!')) return handleCommand(text, reply, sendShot)
 }
 
 // ---------- Arahan ----------
-async function handleCommand(text, reply) {
+async function handleCommand(text, reply, sendShot) {
   const [cmdRaw, ...rest] = text.split(/\s+/)
   const cmd = cmdRaw.toLowerCase()
   const arg = rest.join(' ').trim()
   const settings = getSettings()
+
+  if (config.method === 'web' && API_ONLY.includes(cmd)) {
+    return reply('Arahan ini hanya untuk kaedah API. Bot sekarang guna kaedah *web*: taip !bantuan.')
+  }
+  if (config.method === 'api' && WEB_ONLY.includes(cmd)) {
+    return reply('Arahan ini hanya untuk kaedah web (TIKTOK_METHOD=web). Taip !bantuan.')
+  }
 
   const needsTikTok = ['!login', '!kod', '!code']
   const missing = missingTikTokConfig()
@@ -220,7 +259,49 @@ async function handleCommand(text, reply) {
       }
     }
 
+    case '!sessionid':
+    case '!cookies': {
+      if (!arg) {
+        return reply(
+          cmd === '!sessionid'
+            ? 'Guna: !sessionid <nilai cookie sessionid dari tiktok.com>'
+            : 'Guna: !cookies <JSON dari Cookie-Editor>  atau hantar fail .json sebagai Document dengan caption !cookies',
+        )
+      }
+      try {
+        const n = saveCookies(arg)
+        return reply(`✅ ${n} cookies disimpan.\n🔒 Padam mesej anda tadi (Delete for everyone) sebab ia macam password.\nTaip !semak untuk pastikan login berjaya.`)
+      } catch (e) {
+        return reply(`❌ ${e.message}`)
+      }
+    }
+
+    case '!semak': {
+      if (!hasCookies()) return reply('❌ Belum login. Hantar !sessionid <nilai> dulu.')
+      const position = enqueue(async () => {
+        try {
+          const res = await checkLogin()
+          await reply(res.ok ? '✅ Login TikTok OK, page upload dapat dibuka.' : '⚠️ Page upload dibuka tapi butang upload tak jumpa. Tengok screenshot.')
+          await sendShot(res.screenshot, 'Screenshot page upload TikTok')
+        } catch (e) {
+          await reply(`❌ ${e.message}`)
+          await sendShot(e.screenshot, 'Screenshot semasa ralat')
+        }
+      })
+      return reply(position > 1 ? `⏳ Dalam giliran (#${position}).` : '🔎 Sedang semak login TikTok...')
+    }
+
     case '!status': {
+      if (config.method === 'web') {
+        return reply(
+          [
+            'Kaedah: *web* (upload melalui tiktok.com)',
+            `TikTok: ${hasCookies() ? '✅ cookies ada (taip !semak untuk uji)' : '❌ belum login (hantar !sessionid)'}`,
+            `Auto tukar 60fps: ${config.video.autoConvert60 ? 'ON' : 'OFF'}`,
+            `Video dalam giliran: ${queued}`,
+          ].join('\n'),
+        )
+      }
       const token = getTokenInfo()
       const lines = [
         `Mod: *${settings.mode}* ${settings.mode === 'direct' ? '(terus post)' : '(hantar ke inbox TikTok)'}`,
@@ -265,6 +346,10 @@ async function handleCommand(text, reply) {
     }
 
     case '!logout':
+      if (config.method === 'web') {
+        clearCookies()
+        return reply('✅ Login TikTok dipadam dari bot. Hantar !sessionid untuk login semula.')
+      }
       clearToken()
       return reply('✅ Akaun TikTok diputuskan. Taip !login untuk sambung semula.')
 
@@ -274,7 +359,7 @@ async function handleCommand(text, reply) {
 }
 
 // ---------- Video ----------
-async function handleVideo(sock, msg, { doc, vid, reply }) {
+async function handleVideo(sock, msg, { doc, vid, reply, sendShot }) {
   const media = doc || vid
   const fileName = doc?.fileName || 'video.mp4'
   const isVideo = vid || doc.mimetype?.startsWith('video/') || VIDEO_EXT.test(fileName)
@@ -286,17 +371,21 @@ async function handleVideo(sock, msg, { doc, vid, reply }) {
   const caption = (media.caption || '').trim()
   const settings = getSettings()
 
-  if (missingTikTokConfig().length) return reply('❌ Key TikTok belum diisi dalam .env di VPS. Isi dulu, kemudian !login.')
-  const token = getTokenInfo()
-  const needScope = settings.mode === 'draft' ? 'video.upload' : 'video.publish'
-  if (!token) return reply('❌ Belum login TikTok. Taip !login dulu.')
-  if (!token.scope?.includes(needScope)) return reply(`❌ Login TikTok tiada scope ${needScope}. Taip !login semula.`)
+  if (config.method === 'web') {
+    if (!hasCookies()) return reply('❌ Belum login TikTok. Hantar !sessionid <nilai> dulu.')
+  } else {
+    if (missingTikTokConfig().length) return reply('❌ Key TikTok belum diisi dalam .env di VPS. Isi dulu, kemudian !login.')
+    const token = getTokenInfo()
+    const needScope = settings.mode === 'draft' ? 'video.upload' : 'video.publish'
+    if (!token) return reply('❌ Belum login TikTok. Taip !login dulu.')
+    if (!token.scope?.includes(needScope)) return reply(`❌ Login TikTok tiada scope ${needScope}. Taip !login semula.`)
+  }
 
-  const position = enqueue(() => processVideo(sock, msg, { media, fileName, caption, settings, isDoc: !!doc, reply }))
+  const position = enqueue(() => processVideo(sock, msg, { media, fileName, caption, settings, isDoc: !!doc, reply, sendShot }))
   if (position > 1) await reply(`⏳ Dalam giliran (#${position}).`)
 }
 
-async function processVideo(sock, msg, { media, fileName, caption, settings, isDoc, reply }) {
+async function processVideo(sock, msg, { media, fileName, caption, settings, isDoc, reply, sendShot }) {
   const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   const ext = path.extname(fileName) || '.mp4'
   const original = path.join(config.downloadDir, `${id}${ext}`)
@@ -324,6 +413,14 @@ async function processVideo(sock, msg, { media, fileName, caption, settings, isD
           await reply(`⚠️ Video ${info.fps}fps. TikTok maks 60fps, mungkin ditolak.`)
         }
       }
+    }
+
+    if (config.method === 'web') {
+      await reply('🚀 Bot sedang buka TikTok & upload video (boleh ambil beberapa minit)...')
+      const res = await uploadVideo({ filePath: uploadPath, caption, onStage: (s) => log(`Web upload ${id}: ${s}`) })
+      if (res.screenshot) fs.rm(res.screenshot, { force: true }, () => {})
+      await reply('✅ *Dah post ke TikTok!* Semak dalam app TikTok (kadang-kadang ambil masa beberapa minit untuk keluar).')
+      return
     }
 
     if (settings.mode === 'direct') {
@@ -362,7 +459,9 @@ async function processVideo(sock, msg, { media, fileName, caption, settings, isD
     }
   } catch (e) {
     log(`Ralat video ${id}:`, e.message, e.details ? JSON.stringify(e.details) : '')
-    await reply(`❌ ${e instanceof TikTokError ? e.message : `Ralat: ${e.message}`}${hintFor(e)}`)
+    const known = e instanceof TikTokError || e instanceof WebUploadError
+    await reply(`❌ ${known ? e.message : `Ralat: ${e.message}`}${hintFor(e)}`)
+    if (e instanceof WebUploadError) await sendShot(e.screenshot, 'Screenshot TikTok semasa ralat')
   } finally {
     for (const f of [original, converted]) fs.rm(f, { force: true }, () => {})
   }
