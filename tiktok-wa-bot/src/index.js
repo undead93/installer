@@ -108,9 +108,10 @@ function isAllowed(key) {
 }
 
 // ---------- WhatsApp ----------
-let pairingRequested = false
+let loggedOutCount = 0
 
 async function start() {
+  let pairingRequested = false // setiap sambungan baru minta kod baru
   const { state, saveCreds } = await useMultiFileAuthState(config.waAuthDir)
   const { version } = await fetchLatestBaileysVersion().catch(() => ({ version: undefined }))
 
@@ -145,13 +146,26 @@ async function start() {
       }
     }
     if (connection === 'open') {
+      loggedOutCount = 0
       log(`✅ WhatsApp bersambung sebagai ${sock.user?.id}`)
     }
     if (connection === 'close') {
       const code = lastDisconnect?.error?.output?.statusCode
-      if (code === DisconnectReason.loggedOut) {
-        log(`❌ WhatsApp log keluar. Padam folder ${config.waAuthDir} dan jalankan semula untuk link semula.`)
+      if (code === DisconnectReason.connectionReplaced) {
+        log('❌ Sesi WhatsApp ni sedang digunakan oleh bot lain (kod 440).')
+        log('   Biasanya sebab bot berjalan DUA kali, cth pm2 + npm start serentak. Jalankan "pm2 stop tiktok-wa-bot" atau tutup yang satu lagi.')
         process.exit(1)
+      }
+      if (code === DisconnectReason.loggedOut || code === DisconnectReason.badSession) {
+        loggedOutCount++
+        if (loggedOutCount > 3) {
+          log('❌ WhatsApp asyik log keluar. Pastikan bot tak berjalan dua kali (pm2 list) dan nombor dalam WA_PAIRING_NUMBER betul, kemudian jalankan semula.')
+          process.exit(1)
+        }
+        log(`⚠️ WhatsApp log keluar (kod ${code}). Sesi lama dipadam, bot akan minta pairing code / QR baru...`)
+        fs.rmSync(config.waAuthDir, { recursive: true, force: true })
+        setTimeout(() => start().catch((e) => log('Gagal mula semula:', e)), 3000)
+        return
       }
       log(`⚠️ Sambungan terputus (kod ${code ?? '-'}), sambung semula dalam 3 saat...`)
       setTimeout(() => start().catch((e) => log('Gagal sambung semula:', e)), 3000)
