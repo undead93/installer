@@ -116,6 +116,25 @@ Bot login TikTok guna cookie **`sessionid`** dari browser yang dah login TikTok.
 - ⚠️ **Jangan tekan Log out** dalam browser tempat anda ambil sessionid tu. Kalau log out, sessionid tu tak boleh guna lagi. Tutup browser sahaja.
 - Sessionid akan tamat selepas beberapa minggu atau bulan. Bila bot cakap login tamat, ambil sessionid baru.
 
+## Nombor WhatsApp dah ada bot lain?
+
+Satu nombor WhatsApp boleh ada sampai **4 linked device**, jadi bot ni boleh berkongsi nombor dengan bot lain. Masalahnya, kedua-dua bot akan baca semua mesej. Ada tiga cara untuk selesaikan:
+
+**Cara 1: Guna nombor lain untuk bot ni (paling bersih).**
+
+**Cara 2: Mod "Message yourself" (`SELF_CHAT=true`). Tak perlu nombor kedua.**
+- Link bot ni ke **nombor utama anda** (`WA_PAIRING_NUMBER` = nombor anda sendiri).
+- Hantar video dan arahan dalam chat **"Message yourself"** (chat dengan diri sendiri).
+- Bot hanya baca mesej dalam chat tu, jadi bot lain di nombor kedua tak terlibat langsung.
+- ⚠️ Baileys ada risiko ban, dan kali ni risiko tu pada nombor utama anda.
+
+**Cara 3: Kongsi nombor yang sama dengan bot lain.**
+- `COMMAND_PREFIX=tt`: arahan bot ni jadi `tt semak`, `tt sessionid ...` dan tak bertembung dengan `!` bot lain.
+- `VIDEO_TRIGGER=tt`: bot ni hanya proses video yang caption bermula dengan `tt`. Contohnya caption `tt Video best #fyp` akan dipost sebagai `Video best #fyp`.
+- Bot lain mungkin masih balas mesej yang sama, sebab bot ni tak boleh kawal bot lain.
+
+Lepas ubah `.env`, jalankan `pm2 restart tiktok-wa-bot`.
+
 ## 5. Cara guna
 
 📎 Dalam chat bot, tekan **Attach → Document**, pilih video, tulis caption (boleh letak #hashtag dan baris baru), dan hantar.

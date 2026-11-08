@@ -8,6 +8,7 @@ import makeWASocket, {
   DisconnectReason,
   downloadMediaMessage,
   fetchLatestBaileysVersion,
+  generateMessageIDV2,
   isJidGroup,
   jidDecode,
   makeCacheableSignalKeyStore,
@@ -79,6 +80,49 @@ const HELP_API = `${HELP_HEAD}
 • !bantuan – mesej ini`
 
 const HELP = config.method === 'web' ? HELP_WEB : HELP_API
+
+// ---------- Awalan arahan & trigger ----------
+const P = config.prefix
+const needsSpace = (word) => /[a-z0-9]$/i.test(word)
+
+/** Tukar teks pengguna kepada bentuk dalaman "!arahan ...", atau null kalau bukan arahan bot ni. */
+function parseCommand(text) {
+  if (!text.toLowerCase().startsWith(P.toLowerCase())) return null
+  let rest = text.slice(P.length)
+  if (needsSpace(P)) {
+    if (!/^\s/.test(rest)) return null
+    rest = rest.trimStart()
+  }
+  return rest ? `!${rest}` : null
+}
+
+/** Tunjuk arahan dalam mesej balasan ikut awalan yang dipilih. */
+function fmt(text) {
+  if (P === '!') return text
+  return text.replace(/!(?=[a-z])/g, needsSpace(P) ? `${P} ` : P)
+}
+
+/** Pulangkan caption tanpa trigger, atau null kalau trigger diperlukan tapi tiada. */
+function stripTrigger(caption) {
+  const t = config.videoTrigger
+  if (!t) return caption
+  if (!caption.toLowerCase().startsWith(t.toLowerCase())) return null
+  const rest = caption.slice(t.length)
+  if (needsSpace(t) && rest && !/^\s/.test(rest)) return null
+  return rest.trim()
+}
+
+// ID mesej yang dihantar oleh bot sendiri (supaya bot tak proses balasannya sendiri dalam mod SELF_CHAT)
+const botSent = new Set()
+function rememberSent(id) {
+  botSent.add(id)
+  if (botSent.size > 500) botSent.delete(botSent.values().next().value)
+}
+
+function isSelfChat(sock, jid) {
+  const target = jidDecode(jid)?.user
+  return [sock.user?.id, sock.user?.lid].filter(Boolean).some((j) => jidDecode(j)?.user === target)
+}
 const API_ONLY = ['!login', '!kod', '!code', '!mod', '!mode', '!privasi', '!privacy']
 const WEB_ONLY = ['!sessionid', '!cookies', '!semak']
 
@@ -173,10 +217,10 @@ async function start() {
   })
 
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
-    if (type !== 'notify') return
+    if (type !== 'notify' && !config.selfChat) return
     for (const msg of messages) {
       try {
-        await handleMessage(sock, msg)
+        await handleMessage(sock, msg, type)
       } catch (e) {
         log('Ralat proses mesej:', e)
       }
@@ -184,24 +228,38 @@ async function start() {
   })
 }
 
-async function handleMessage(sock, msg) {
+async function handleMessage(sock, msg, type) {
   const jid = msg.key.remoteJid
-  if (!msg.message || msg.key.fromMe || !jid || isJidGroup(jid) || jid === 'status@broadcast') return
+  if (!msg.message || !jid || isJidGroup(jid) || jid === 'status@broadcast') return
+  if (botSent.has(msg.key.id)) return
 
-  if (!isAllowed(msg.key)) {
-    if (!warnedJids.has(jid)) {
-      warnedJids.add(jid)
-      log(`🚫 Mesej daripada ${senderNumbers(msg.key).join(' / ')} diabaikan. Kalau ini anda, tambah nombor ini dalam ALLOWED_NUMBERS.`)
+  if (config.selfChat) {
+    // Hanya proses mesej yang ANDA hantar dalam chat "Message yourself"
+    if (!msg.key.fromMe || !isSelfChat(sock, jid)) return
+    const ts = Number(msg.messageTimestamp || 0)
+    if (ts && Date.now() / 1000 - ts > 120) return // abaikan mesej lama
+  } else {
+    if (msg.key.fromMe || type !== 'notify') return
+    if (!isAllowed(msg.key)) {
+      if (!warnedJids.has(jid)) {
+        warnedJids.add(jid)
+        log(`🚫 Mesej daripada ${senderNumbers(msg.key).join(' / ')} diabaikan. Kalau ini anda, tambah nombor ini dalam ALLOWED_NUMBERS.`)
+      }
+      return
     }
-    return
   }
 
   const content = normalizeMessageContent(msg.message)
   if (!content) return
-  const reply = (text) => sock.sendMessage(jid, { text }, { quoted: msg })
+  const send = (body, opts = {}) => {
+    const messageId = generateMessageIDV2(sock.user?.id)
+    rememberSent(messageId)
+    return sock.sendMessage(jid, body, { ...opts, messageId })
+  }
+  const reply = (text) => send({ text: fmt(text) }, { quoted: msg })
   const sendShot = async (file, caption) => {
     if (!file || !fs.existsSync(file)) return
-    await sock.sendMessage(jid, { image: fs.readFileSync(file), caption })
+    await send({ image: fs.readFileSync(file), caption })
     fs.rm(file, { force: true }, () => {})
   }
 
@@ -209,7 +267,7 @@ async function handleMessage(sock, msg) {
   const vid = content.videoMessage
 
   // Fail cookies (.json/.txt) dengan caption !cookies
-  if (doc && /^!cookies/i.test((doc.caption || '').trim())) {
+  if (doc && /^!cookies\b/i.test(parseCommand((doc.caption || '').trim()) || '')) {
     try {
       const buf = await downloadMediaMessage(msg, 'buffer', {}, { logger, reuploadRequest: sock.updateMediaMessage })
       const n = saveCookies(buf.toString('utf8'))
@@ -219,10 +277,11 @@ async function handleMessage(sock, msg) {
     }
   }
 
-  if (doc || vid) return handleVideo(sock, msg, { doc, vid, reply, sendShot })
+  if (doc || vid) return handleVideo(sock, msg, { doc, vid, reply, sendShot, send })
 
   const text = (content.conversation || content.extendedTextMessage?.text || '').trim()
-  if (text.startsWith('!')) return handleCommand(text, reply, sendShot)
+  const command = parseCommand(text)
+  if (command) return handleCommand(command, reply, sendShot)
 }
 
 // ---------- Arahan ----------
@@ -249,7 +308,7 @@ async function handleCommand(text, reply, sendShot) {
     case '!bantuan':
     case '!help':
     case '!menu':
-      return reply(HELP)
+      return reply(HELP + (config.videoTrigger ? `\n\n📝 Caption video mesti bermula dengan: *${config.videoTrigger}*` : ''))
 
     case '!login': {
       const url = buildAuthUrl(settings.mode)
@@ -373,8 +432,9 @@ async function handleCommand(text, reply, sendShot) {
 }
 
 // ---------- Video ----------
-async function handleVideo(sock, msg, { doc, vid, reply, sendShot }) {
+async function handleVideo(sock, msg, { doc, vid, reply, sendShot, send }) {
   const media = doc || vid
+  if (stripTrigger((media.caption || '').trim()) === null) return // tiada trigger: bukan untuk bot ni
   const fileName = doc?.fileName || 'video.mp4'
   const isVideo = vid || doc.mimetype?.startsWith('video/') || VIDEO_EXT.test(fileName)
   if (!isVideo) return reply('❌ Document ni bukan video. Hantar fail .mp4 / .mov / .webm.')
@@ -382,7 +442,8 @@ async function handleVideo(sock, msg, { doc, vid, reply, sendShot }) {
   const size = Number(media.fileLength || 0)
   if (size > MAX_SIZE) return reply('❌ Fail lebih 4GB, TikTok tak terima.')
 
-  const caption = (media.caption || '').trim()
+  const caption = stripTrigger((media.caption || '').trim())
+  if (caption === null) return // tiada trigger: bukan untuk bot ni
   const settings = getSettings()
 
   if (config.method === 'web') {
@@ -395,11 +456,11 @@ async function handleVideo(sock, msg, { doc, vid, reply, sendShot }) {
     if (!token.scope?.includes(needScope)) return reply(`❌ Login TikTok tiada scope ${needScope}. Taip !login semula.`)
   }
 
-  const position = enqueue(() => processVideo(sock, msg, { media, fileName, caption, settings, isDoc: !!doc, reply, sendShot }))
+  const position = enqueue(() => processVideo(sock, msg, { media, fileName, caption, settings, isDoc: !!doc, reply, sendShot, send }))
   if (position > 1) await reply(`⏳ Dalam giliran (#${position}).`)
 }
 
-async function processVideo(sock, msg, { media, fileName, caption, settings, isDoc, reply, sendShot }) {
+async function processVideo(sock, msg, { media, fileName, caption, settings, isDoc, reply, sendShot, send }) {
   const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   const ext = path.extname(fileName) || '.mp4'
   const original = path.join(config.downloadDir, `${id}${ext}`)
@@ -465,7 +526,7 @@ async function processVideo(sock, msg, { media, fileName, caption, settings, isD
       await reply(`✅ *Dah post ke TikTok!*${postId ? `\nID video: ${postId}` : ''}${settings.privacy === 'SELF_ONLY' ? '\n(Privasi: Only me)' : ''}`)
     } else if (result.status === 'SEND_TO_USER_INBOX') {
       await reply('✅ Video dah masuk *inbox TikTok*. Buka app TikTok → notifikasi → sambung edit & tekan Post.\nCaption anda (copy di bawah):')
-      if (caption) await sock.sendMessage(msg.key.remoteJid, { text: caption })
+      if (caption) await send({ text: caption })
     } else if (result.status === 'FAILED') {
       await reply(`❌ TikTok gagal proses video: ${result.fail_reason || 'sebab tak diketahui'}`)
     } else {

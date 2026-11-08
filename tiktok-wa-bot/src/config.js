@@ -14,6 +14,12 @@ export const config = {
   allowedNumbers: list(process.env.ALLOWED_NUMBERS).map((n) => n.replace(/\D/g, '')),
   // Kalau diisi, bot login guna "pairing code" (tak perlu scan QR). Nombor WhatsApp BOT.
   pairingNumber: (process.env.WA_PAIRING_NUMBER || '').replace(/\D/g, ''),
+  // true = bot di-link ke nombor ANDA SENDIRI, guna chat "Message yourself" (tak perlu nombor kedua)
+  selfChat: (process.env.SELF_CHAT || 'false').toLowerCase() === 'true',
+  // Awalan arahan. Tukar kalau bertembung dengan bot lain. Awalan yang berakhir dengan huruf perlu jarak: "tt" → "tt semak"; "#" → "#semak"
+  prefix: (process.env.COMMAND_PREFIX || '!').trim() || '!',
+  // Kalau diisi, video hanya diproses bila caption bermula dengan perkataan ini (cth "tt"). Perkataan ni dibuang dari caption.
+  videoTrigger: (process.env.VIDEO_TRIGGER || '').trim(),
 
   // web = upload melalui tiktok.com guna browser automatik (tak perlu developer)
   // api = TikTok Content Posting API rasmi (perlu app TikTok for Developers)
@@ -52,8 +58,8 @@ export function missingTikTokConfig() {
 }
 
 export function checkConfig() {
-  if (!config.allowedNumbers.length) {
-    console.error('❌ Sila isi ALLOWED_NUMBERS dalam fail .env')
+  if (!config.selfChat && !config.allowedNumbers.length) {
+    console.error('❌ Sila isi ALLOWED_NUMBERS dalam fail .env (atau set SELF_CHAT=true)')
     process.exit(1)
   }
   if (!['web', 'api'].includes(config.method)) {
