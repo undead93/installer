@@ -295,10 +295,35 @@ async function qrScreenshot(page) {
   return screenshot(page)
 }
 
-async function typeCaption(page, caption) {
+const POPUP_BUTTONS = /^\s*(Cancel|Not now|Got it|OK|Skip|Close|Dismiss|Later|Batal|Bukan sekarang|Faham|Langkau|Tutup)\s*$/i
+
+/**
+ * Tutup popup/modal TikTok yang menghalang page (cth "Turn on automatic content checks?").
+ * JANGAN panggil selepas tekan Post, sebab ia boleh tekan "Cancel" pada dialog pengesahan post.
+ */
+async function dismissPopups(page) {
+  for (let i = 0; i < 5; i++) {
+    const dialog = page
+      .locator('[role="dialog"], [aria-modal="true"], [class*="TUXModal"], [class*="modal-container" i]')
+      .filter({ visible: true })
+      .first()
+    if (!(await dialog.isVisible().catch(() => false))) return
+    const btn = dialog.getByRole('button', { name: POPUP_BUTTONS }).first()
+    const close = dialog.locator('button[aria-label*="close" i], [class*="close" i][role="button"], button[class*="close" i]').first()
+    if (await btn.isVisible().catch(() => false)) await btn.click({ timeout: 5000 }).catch(() => {})
+    else if (await close.isVisible().catch(() => false)) await close.click({ timeout: 5000 }).catch(() => {})
+    else await page.keyboard.press('Escape')
+    await page.waitForTimeout(1000)
+  }
+}
+
+const norm = (t) => String(t || '').replace(/\s+/g, ' ').trim()
+
+async function typeCaption(page, caption, fileStem) {
+  await dismissPopups(page)
   const editor = page.locator('.public-DraftEditor-content, div[contenteditable="true"]').first()
   await editor.waitFor({ state: 'visible', timeout: 120_000 })
-  await editor.click()
+  await editor.click({ timeout: 10_000 }).catch(() => editor.focus())
   // TikTok isi nama fail sebagai caption: padam dulu
   await page.keyboard.press('Control+A')
   await page.keyboard.press('Backspace')
@@ -316,6 +341,12 @@ async function typeCaption(page, caption) {
     if (i < lines.length - 1) await page.keyboard.press('Enter')
   }
   await page.waitForTimeout(1000)
+
+  // Pastikan caption betul-betul ditulis (bukan nama fail)
+  const written = norm(await editor.innerText().catch(() => ''))
+  const expected = norm(caption).slice(0, 20)
+  const ok = expected ? written.includes(expected) : !written.includes(fileStem)
+  if (!ok) throw new WebUploadError('Caption tak dapat ditulis dalam TikTok (mungkin ada popup menghalang). Tengok screenshot.')
 }
 
 function postButton(page) {
@@ -352,17 +383,24 @@ export async function uploadVideo({ filePath, caption, onStage }) {
     })
     await input.setInputFiles(filePath)
     onStage?.('uploading')
+    await page.waitForTimeout(4000)
+    await dismissPopups(page)
 
-    if (caption) await typeCaption(page, caption)
+    // Sentiasa tulis caption (kalau kosong, padam nama fail yang TikTok isi sendiri)
+    await typeCaption(page, caption || '', path.basename(filePath, path.extname(filePath)))
 
     const button = postButton(page)
     await waitUntilEnabled(page, button, config.web.uploadTimeoutMin * 60_000).catch(() => {
       throw new WebUploadError('Upload terlalu lama atau butang Post tak aktif.')
     })
     await failIfCaptcha(page)
+    await dismissPopups(page)
     await page.waitForTimeout(1500)
     onStage?.('posting')
-    await button.click()
+    await button.click({ timeout: 15_000 }).catch(async () => {
+      await dismissPopups(page)
+      await button.click({ timeout: 15_000, force: true })
+    })
 
     // Kadang-kadang TikTok tanya "Continue to post?" / "Post now"
     const confirm = page.getByRole('button', { name: /^\s*(Post now|Continue|Siarkan sekarang|Teruskan)\s*$/i }).first()
