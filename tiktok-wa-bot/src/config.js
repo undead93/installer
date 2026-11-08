@@ -33,15 +33,23 @@ export const config = {
   },
 }
 
-export function checkConfig() {
+export function missingTikTokConfig() {
   const missing = []
   if (!config.tiktok.clientKey) missing.push('TIKTOK_CLIENT_KEY')
   if (!config.tiktok.clientSecret) missing.push('TIKTOK_CLIENT_SECRET')
   if (!config.tiktok.redirectUri) missing.push('TIKTOK_REDIRECT_URI')
-  if (!config.allowedNumbers.length) missing.push('ALLOWED_NUMBERS')
-  if (missing.length) {
-    console.error(`❌ Sila isi dalam fail .env: ${missing.join(', ')}`)
+  return missing
+}
+
+export function checkConfig() {
+  if (!config.allowedNumbers.length) {
+    console.error('❌ Sila isi ALLOWED_NUMBERS dalam fail .env')
     process.exit(1)
+  }
+  const missing = missingTikTokConfig()
+  if (missing.length) {
+    // WhatsApp masih boleh di-link dulu; TikTok boleh disambung kemudian
+    console.warn(`⚠️ Belum isi dalam .env: ${missing.join(', ')}. Bot boleh link WhatsApp dulu, tapi TikTok belum boleh digunakan.`)
   }
   if (!['direct', 'draft'].includes(config.tiktok.defaultMode)) {
     console.error('❌ TIKTOK_MODE mesti "direct" atau "draft"')

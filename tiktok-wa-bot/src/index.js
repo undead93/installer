@@ -16,7 +16,7 @@ import makeWASocket, {
 } from '@whiskeysockets/baileys'
 import pino from 'pino'
 import qrcode from 'qrcode-terminal'
-import { checkConfig, config } from './config.js'
+import { checkConfig, config, missingTikTokConfig } from './config.js'
 import { getSettings, updateSettings } from './store.js'
 import {
   PRIVACY_LEVELS,
@@ -186,6 +186,12 @@ async function handleCommand(text, reply) {
   const arg = rest.join(' ').trim()
   const settings = getSettings()
 
+  const needsTikTok = ['!login', '!kod', '!code']
+  const missing = missingTikTokConfig()
+  if (needsTikTok.includes(cmd) && missing.length) {
+    return reply(`❌ Key TikTok belum diisi dalam .env di VPS: ${missing.join(', ')}\nIsi, kemudian jalankan: pm2 restart tiktok-wa-bot`)
+  }
+
   switch (cmd) {
     case '!bantuan':
     case '!help':
@@ -280,6 +286,7 @@ async function handleVideo(sock, msg, { doc, vid, reply }) {
   const caption = (media.caption || '').trim()
   const settings = getSettings()
 
+  if (missingTikTokConfig().length) return reply('❌ Key TikTok belum diisi dalam .env di VPS. Isi dulu, kemudian !login.')
   const token = getTokenInfo()
   const needScope = settings.mode === 'draft' ? 'video.upload' : 'video.publish'
   if (!token) return reply('❌ Belum login TikTok. Taip !login dulu.')
