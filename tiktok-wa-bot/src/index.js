@@ -32,7 +32,7 @@ import {
   waitForPublish,
 } from './tiktok.js'
 import { WebUploadError, checkLogin, clearCookies, hasCookies, loginWithQr, saveCookies, uploadVideo } from './tiktok-web.js'
-import { convertTo60, probe } from './video.js'
+import { describe, optimize, plan, probe } from './video.js'
 
 checkConfig()
 fs.mkdirSync(config.downloadDir, { recursive: true })
@@ -405,7 +405,7 @@ async function handleCommand(text, reply, sendShot) {
           [
             'Kaedah: *web* (upload melalui tiktok.com)',
             `TikTok: ${hasCookies() ? '✅ cookies ada (taip !semak untuk uji)' : '❌ belum login (taip !loginqr)'}`,
-            `Auto tukar 60fps: ${config.video.autoConvert60 ? 'ON' : 'OFF'}`,
+            `Optimumkan video (H.264 1080p SDR): ${config.video.optimize ? 'ON' : 'OFF'}`,
             `Video dalam giliran: ${queued}`,
           ].join('\n'),
         )
@@ -414,7 +414,7 @@ async function handleCommand(text, reply, sendShot) {
       const lines = [
         `Mod: *${settings.mode}* ${settings.mode === 'direct' ? '(terus post)' : '(hantar ke inbox TikTok)'}`,
         `Privasi: *${settings.privacy}*`,
-        `Auto tukar 60fps: ${config.video.autoConvert60 ? 'ON' : 'OFF'}`,
+        `Optimumkan video (H.264 1080p SDR): ${config.video.optimize ? 'ON' : 'OFF'}`,
       ]
       if (!token) {
         lines.push('TikTok: ❌ belum login (taip !login)')
@@ -499,7 +499,7 @@ async function processVideo(sock, msg, { media, fileName, caption, settings, isD
   const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   const ext = path.extname(fileName) || '.mp4'
   const original = path.join(config.downloadDir, `${id}${ext}`)
-  const converted = path.join(config.downloadDir, `${id}-60fps.mp4`)
+  const converted = path.join(config.downloadDir, `${id}-hd.mp4`)
   const sizeMb = (Number(media.fileLength || 0) / 1024 / 1024).toFixed(1)
 
   try {
@@ -514,14 +514,16 @@ async function processVideo(sock, msg, { media, fileName, caption, settings, isD
     let uploadPath = original
     const info = await probe(original)
     if (info) {
-      log(`Video ${id}: ${info.width}x${info.height} ${info.fps}fps ${info.codec} ${info.duration.toFixed(1)}s`)
-      if (info.fps > 60) {
-        if (config.video.autoConvert60) {
-          await reply(`🎞️ Video ${info.fps}fps. TikTok maks 60fps, jadi bot tukar ke 60fps kualiti tinggi dulu...`)
-          uploadPath = await convertTo60(original, converted)
-        } else {
-          await reply(`⚠️ Video ${info.fps}fps. TikTok maks 60fps, mungkin ditolak.`)
-        }
+      log(`Video ${id}: ${describe(info)} ${info.duration.toFixed(1)}s`)
+      const p = plan(info)
+      if (p.reencode || p.addAudio) {
+        const what = [...p.reasons, ...(p.addAudio ? ['tambah trek audio senyap'] : [])]
+        await reply(`🎞️ Fail asal: ${describe(info)}\nBot optimumkan dulu:\n• ${what.join('\n• ')}\n(boleh ambil beberapa minit)`)
+        uploadPath = await optimize(original, converted, info, p)
+        const out = await probe(uploadPath)
+        await reply(`✅ Fail siap: ${describe(out)}`)
+      } else {
+        await reply(`🎞️ Fail: ${describe(info)}\nDah elok, dihantar tanpa diubah.`)
       }
     }
 

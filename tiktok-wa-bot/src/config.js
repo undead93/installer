@@ -43,8 +43,12 @@ export const config = {
   video: {
     // Tukar video >60fps ke 60fps guna ffmpeg (TikTok API tak terima lebih 60fps)
     autoConvert60: (process.env.AUTO_CONVERT_60FPS || 'true').toLowerCase() !== 'false',
+    // Optimumkan video sebelum upload: H.264 1080p SDR 8-bit (tukar HEVC/HDR/4K iPhone). Fail yang dah elok tak diencode semula.
+    optimize: (process.env.OPTIMIZE_VIDEO || 'true').toLowerCase() !== 'false',
+    // Siling bitrate bila encode semula (Mbps). Panduan biasa: 8–12
+    maxBitrateMbps: Number(process.env.MAX_BITRATE_MBPS || 12),
     // Kualiti encode semula: 14–20 (lebih kecil = lebih cantik, fail lebih besar)
-    crf: Number(process.env.FFMPEG_CRF || 16),
+    crf: Number(process.env.FFMPEG_CRF || 17),
     preset: process.env.FFMPEG_PRESET || 'slow',
   },
 }
