@@ -49,11 +49,26 @@ function sessionCookies(sessionId) {
  * Pulangkan bilangan cookie yang disimpan.
  */
 export function saveCookies(input) {
-  const text = String(input || '').trim()
+  // iPhone/WhatsApp kadang-kadang tukar " kepada “ ”
+  const text = String(input || '').replace(/[\u201C\u201D\u201E\u2033]/g, '"').replace(/[\u2018\u2019]/g, "'").trim()
   if (!text) throw new WebUploadError('Kosong. Hantar nilai sessionid atau JSON cookies.')
 
+  const pairs = text.split(';').map((p) => p.trim()).filter((p) => /^[^=\s]+=/.test(p))
+
   let cookies
-  if (text.startsWith('[') || text.startsWith('{')) {
+  if (!text.startsWith('[') && !text.startsWith('{') && pairs.length >= 3) {
+    // "Header String" dari Cookie-Editor: nama=nilai; nama2=nilai2; ...
+    cookies = pairs
+      .map((p) => {
+        const i = p.indexOf('=')
+        return { name: p.slice(0, i), value: p.slice(i + 1) }
+      })
+      .filter((c) => !['path', 'domain', 'expires', 'max-age', 'samesite'].includes(c.name.toLowerCase()))
+      .map((c) => toPlaywrightCookie({ ...c, domain: '.tiktok.com', secure: true, sameSite: 'no_restriction' }))
+    if (!cookies.some((c) => c.name === 'sessionid')) {
+      throw new WebUploadError('Cookie "sessionid" tiada dalam teks tu. Pastikan anda dah login TikTok sebelum export.')
+    }
+  } else if (text.startsWith('[') || text.startsWith('{')) {
     let parsed
     try {
       parsed = JSON.parse(text)
@@ -132,11 +147,27 @@ async function screenshot(page) {
   return file
 }
 
+async function dismissCookieBanner(page) {
+  const btn = page.getByRole('button', { name: /^(Decline optional cookies|Allow all|Tolak kuki pilihan|Benarkan semua)$/i }).first()
+  if (await btn.isVisible({ timeout: 1000 }).catch(() => false)) await btn.click().catch(() => {})
+}
+
 async function openUploadPage(page) {
+  // Buka laman utama dulu supaya TikTok set cookie asas (ttwid, msToken) macam browser biasa
+  await page.goto(`${new URL(UPLOAD_URL).origin}/`, { waitUntil: 'domcontentloaded', timeout: 90_000 }).catch(() => {})
+  await page.waitForTimeout(4000)
+  await dismissCookieBanner(page)
+
   await page.goto(UPLOAD_URL, { waitUntil: 'domcontentloaded', timeout: 90_000 })
-  await page.waitForTimeout(3000)
+  await page.waitForTimeout(4000)
+  await dismissCookieBanner(page)
   if (/\/login/.test(page.url())) {
-    throw new WebUploadError('Login TikTok dah tamat / sessionid tak sah. Ambil sessionid baru dan hantar !sessionid <nilai>.')
+    const onlySession = readJson(COOKIE_FILE, []).length <= 3
+    throw new WebUploadError(
+      onlySession
+        ? 'TikTok tak terima sessionid sahaja. Cuba hantar SEMUA cookies: guna extension Cookie-Editor di tiktok.com → Export → JSON, kemudian hantar !cookies <JSON> (atau fail .json dengan caption !cookies).'
+        : 'Login TikTok dah tamat / cookies tak sah. Login semula di browser, export cookies baru dan hantar !cookies <JSON>.',
+    )
   }
   await failIfCaptcha(page)
 }

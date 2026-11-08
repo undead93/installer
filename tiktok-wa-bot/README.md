@@ -93,7 +93,17 @@ pm2 startup      # copy & jalankan arahan yang dipaparkan
 
 Bot login TikTok guna cookie **`sessionid`** dari browser yang dah login TikTok.
 
-### Cara A: Dari PC/laptop (paling senang)
+### Cara utama: Export SEMUA cookies (disyorkan)
+TikTok kadang-kadang tak terima `sessionid` seorang diri, jadi lebih baik hantar semua cookies.
+1. Di PC, install extension **Cookie-Editor** dalam Chrome atau Edge.
+2. Buka **tiktok.com** (pastikan dah login), tekan ikon Cookie-Editor, kemudian **Export → JSON** (atau **Header String**). Ia akan disalin secara automatik.
+3. Buka **WhatsApp Web/Desktop** di PC, dan dalam chat bot (atau "Message yourself") hantar:
+   ```
+   !cookies <paste di sini>
+   ```
+   Atau paste dalam Notepad, simpan sebagai `cookies.json`, dan hantar fail tu sebagai **Document** dengan caption `!cookies`.
+
+### Cara A: sessionid sahaja dari PC/laptop
 1. Buka **Chrome** atau **Edge** dan login di **tiktok.com**.
 2. Tekan **F12**, pergi ke tab **Application** (dalam Edge: **Application** juga), kemudian **Cookies** → `https://www.tiktok.com`.
 3. Cari baris **`sessionid`** dan copy **Value**.
