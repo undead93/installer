@@ -64,7 +64,34 @@ function withAsc(entry, asc) {
 
 const u32 = (b, o) => b.readUInt32BE(o);
 
-export function ttPostProcess(input, output, { pad = true, dup = true } = {}) {
+/** hvcC box with only its parameter-set arrays (VPS/SPS/PPS), like the reference — SEI arrays dropped. */
+function hvcCWithoutSei(box) {
+  const body = box.subarray(8);
+  if (body.length < 23) return box;
+  const n = body[22];
+  const keep = [];
+  let p = 23;
+  for (let i = 0; i < n; i++) {
+    const start = p;
+    const type = body[p] & 63;
+    const count = body.readUInt16BE(p + 1);
+    p += 3;
+    for (let k = 0; k < count; k++) p += 2 + body.readUInt16BE(p);
+    if (type !== 39 && type !== 40) keep.push(body.subarray(start, p));
+  }
+  const head = Buffer.from(body.subarray(0, 23));
+  head[22] = keep.length;
+  const out = Buffer.concat([Buffer.alloc(8), head, ...keep, body.subarray(p)]);
+  out.writeUInt32BE(out.length, 0);
+  out.write('hvcC', 4, 'latin1');
+  return out;
+}
+
+/**
+ * videoTransform(index, au) -> Buffer: optional rewrite of each video access unit (decode order),
+ * e.g. to add Apple SEI / Dolby Vision RPUs to a re-encoded stream.
+ */
+export function ttPostProcess(input, output, { pad = true, dup = true, videoTransform = null } = {}) {
   const src = new Source(input);
   try {
     const top = scanTopLevel(src);
@@ -93,10 +120,14 @@ export function ttPostProcess(input, output, { pad = true, dup = true } = {}) {
         const size = u32(entry, p);
         if (size < 8) break;
         const type = entry.toString('latin1', p + 4, p + 8);
-        if (type !== 'dvcC' && type !== 'dvvC' && type !== 'dvwC') kids.push(entry.subarray(p, p + size));
+        // dvcC/dvvC: the reference carries Dolby Vision RPUs without them; fiel: not in the reference
+        if (type === 'hvcC') kids.push(hvcCWithoutSei(entry.subarray(p, p + size)));
+        else if (!['dvcC', 'dvvC', 'dvwC', 'fiel'].includes(type)) kids.push(entry.subarray(p, p + size));
         p += size;
       }
-      const newEntry = Buffer.concat([entry.subarray(0, 86), ...kids]);
+      const fixed = Buffer.from(entry.subarray(0, 86));
+      fixed.fill(0, 50, 82); // empty compressor name (ffmpeg writes "Lavc... libx265" when it encodes)
+      const newEntry = Buffer.concat([fixed, ...kids]);
       newEntry.writeUInt32BE(newEntry.length, 0);
       stsd.data = Buffer.concat([stsd.data.subarray(0, 8), newEntry]);
     }
@@ -202,56 +233,168 @@ export function ttPostProcess(input, output, { pad = true, dup = true } = {}) {
     const tdur = moov.children.filter((c) => c.type === 'trak').map((t) => u32(find(t, 'tkhd').data, 20));
     mvhd.data.writeUInt32BE(Math.max(...tdur), 16);
 
-    // Offsets: everything after moov moves by delta; padding goes at the end of mdat.
-    const newMoovSize = serialize(moov).length;
-    const delta = newFtyp.length + newMoovSize - (moovBox.end - ftypBox.start);
-    const padStart = src.size + delta; // first padding byte in the new file
-    const padOffsets = [padStart, padStart + 9 * (padBytes.length / PAD_FRAMES)];
-    for (const t of moov.children.filter((c) => c.type === 'trak')) {
+    // ---- chunk layout: every chunk of the original mdat keeps its order; video samples may be rewritten
+    const allTraks = moov.children.filter((c) => c.type === 'trak');
+    const stcoOf = (t) => {
       const stbl = find(t, 'mdia', 'minf', 'stbl');
-      const stco = find(stbl, 'stco') || find(stbl, 'co64');
-      const big = stco.type === 'co64';
-      const n = u32(stco.data, 4);
+      return find(stbl, 'stco') || find(stbl, 'co64');
+    };
+    const readOffsets = (t) => {
+      const b = stcoOf(t);
+      const big = b.type === 'co64';
+      return Array.from({ length: u32(b.data, 4) }, (_, i) => (big ? Number(b.data.readBigUInt64BE(8 + 8 * i)) : u32(b.data, 8 + 4 * i)));
+    };
+    const chunkSamples = (t) => {
+      // [first sample index, count] per chunk, from stsc
+      const stbl = find(t, 'mdia', 'minf', 'stbl');
+      const stsc = find(stbl, 'stsc');
+      const n = readOffsets(t).length;
+      const ents = Array.from({ length: u32(stsc.data, 4) }, (_, i) => [u32(stsc.data, 8 + 12 * i), u32(stsc.data, 12 + 12 * i)]);
+      const out = [];
+      let sample = 0;
+      for (let c = 1; c <= n; c++) {
+        let spc = 0;
+        for (const [first, k] of ents) if (first <= c) spc = k;
+        out.push([sample, spc]);
+        sample += spc;
+      }
+      return out;
+    };
+    const sizesOf = (t) => {
+      const stsz = find(find(t, 'mdia', 'minf', 'stbl'), 'stsz');
+      const fixed = u32(stsz.data, 4);
+      const n = u32(stsz.data, 8);
+      return Array.from({ length: n }, (_, i) => (fixed ? fixed : u32(stsz.data, 12 + 4 * i)));
+    };
+
+    // Rewrite video samples first (into memory-light temp file) so their sizes are known before moov.
+    let vtmp = null;
+    let vNew = null; // [{offset in temp, size}]
+    if (video && videoTransform) {
+      const offs = readOffsets(video);
+      const chunks = chunkSamples(video);
+      const sizes = sizesOf(video);
+      vtmp = `${output}.vtmp`;
+      const fdv = fs.openSync(vtmp, 'w');
+      vNew = [];
+      let tp = 0;
+      try {
+        chunks.forEach(([first, count], ci) => {
+          let p = offs[ci];
+          for (let k = 0; k < count; k++) {
+            const i = first + k;
+            const au = videoTransform(i, src.read(p, sizes[i]));
+            p += sizes[i];
+            fs.writeSync(fdv, au, 0, au.length, tp);
+            vNew.push({ offset: tp, size: au.length });
+            tp += au.length;
+          }
+        });
+      } finally {
+        fs.closeSync(fdv);
+      }
+      const stsz = find(find(video, 'mdia', 'minf', 'stbl'), 'stsz');
+      const data = Buffer.alloc(12 + 4 * vNew.length);
+      data.writeUInt32BE(vNew.length, 8);
+      vNew.forEach((x, i) => data.writeUInt32BE(x.size, 12 + 4 * i));
+      stsz.data = data;
+    }
+
+    // Original chunks in file order (the duplicate audio track shares audio's chunks, so skip it here).
+    const units = [];
+    const owners = allTraks.filter((t) => t !== moov.children[moov.children.length - 1] || !(audio && dup));
+    for (const t of owners) {
+      const offs = readOffsets(t);
+      const chunks = chunkSamples(t);
+      const sizes = t === video && vNew ? vNew.map((x) => x.size) : sizesOf(t);
+      offs.forEach((off, ci) => {
+        if (stcoOf(t).padChunks?.includes(ci)) return; // padding chunks go at the end
+        const [first, count] = chunks[ci] || [0, 0];
+        let len = 0;
+        for (let k = 0; k < count; k++) len += sizes[first + k];
+        units.push({ t, ci, off, len, first, count });
+      });
+    }
+    units.sort((x, y) => x.off - y.off || (x.t === video ? 1 : -1));
+    // dedupe chunks that point at the same bytes (defensive)
+    const dataLen = units.reduce((a, u) => a + u.len, 0) + padBytes.length;
+
+    const moovSize = serialize(moov).length;
+    const freeBox = top.length === 4 ? src.read(top[2].start, top[2].end - top[2].start) : Buffer.alloc(0);
+    const large = 8 + dataLen > 0xffffffff;
+    const mdatHdrLen = large ? 16 : 8;
+    let pos = newFtyp.length + moovSize + freeBox.length + mdatHdrLen;
+    const newOffset = new Map(); // trak -> Map(ci -> offset)
+    for (const u of units) {
+      if (!newOffset.has(u.t)) newOffset.set(u.t, new Map());
+      newOffset.get(u.t).set(u.ci, pos);
+      u.newOff = pos;
+      pos += u.len;
+    }
+    const padStart = pos;
+    const padUnit = padBytes.length / PAD_FRAMES;
+    const padOffsets = [padStart, padStart + 9 * padUnit];
+    for (const t of allTraks) {
+      const b = stcoOf(t);
+      const big = b.type === 'co64';
+      const owner = owners.includes(t) ? t : audio; // duplicate track -> audio's chunks
+      const map = newOffset.get(owner) || new Map();
+      const n = u32(b.data, 4);
       for (let i = 0; i < n; i++) {
-        const at = 8 + (big ? 8 : 4) * i;
-        const padIdx = stco.padChunks ? stco.padChunks.indexOf(i) : -1;
-        const old = big ? Number(stco.data.readBigUInt64BE(at)) : u32(stco.data, at);
-        const val = padIdx >= 0 ? padOffsets[padIdx] : old + delta;
+        const padIdx = b.padChunks ? b.padChunks.indexOf(i) : -1;
+        const val = padIdx >= 0 ? padOffsets[padIdx] : map.get(i);
+        if (val === undefined) throw new Error('chunk offset mapping failed');
         if (!big && val > 0xffffffff) throw new Error('file too large for 32-bit chunk offsets');
-        if (big) stco.data.writeBigUInt64BE(BigInt(val), at);
-        else stco.data.writeUInt32BE(val, at);
+        if (big) b.data.writeBigUInt64BE(BigInt(val), 8 + 8 * i);
+        else b.data.writeUInt32BE(val, 8 + 4 * i);
       }
     }
     const moovBytes = serialize(moov);
-    if (moovBytes.length !== newMoovSize) throw new Error('moov size changed');
+    if (moovBytes.length !== moovSize) throw new Error('moov size changed');
 
-    // write: ftyp + moov + [free] + mdat header (size grows by the padding) + mdat data + padding
     const fd = fs.openSync(output, 'w');
+    const vfd = vtmp ? fs.openSync(vtmp, 'r') : null;
     try {
-      let pos = 0;
+      let w = 0;
       const put = (b) => {
-        fs.writeSync(fd, b, 0, b.length, pos);
-        pos += b.length;
+        fs.writeSync(fd, b, 0, b.length, w);
+        w += b.length;
       };
       put(newFtyp);
       put(moovBytes);
-      if (top.length === 4) put(src.read(top[2].start, top[2].end - top[2].start)); // free
-      const hdrLen = mdatBox.body - mdatBox.start;
-      const mdatHdr = src.read(mdatBox.start, hdrLen);
-      if (hdrLen === 8) mdatHdr.writeUInt32BE(mdatBox.end - mdatBox.start + padBytes.length, 0);
-      else mdatHdr.writeBigUInt64BE(BigInt(mdatBox.end - mdatBox.start + padBytes.length), 8);
-      put(mdatHdr);
-      const chunk = Buffer.allocUnsafe(8 * 1024 * 1024);
-      for (let p = mdatBox.body; p < mdatBox.end; ) {
-        const n = fs.readSync(src.fd, chunk, 0, Math.min(chunk.length, mdatBox.end - p), p);
-        fs.writeSync(fd, chunk, 0, n, pos);
-        pos += n;
-        p += n;
+      put(freeBox);
+      const hdr = Buffer.alloc(mdatHdrLen);
+      if (large) {
+        hdr.writeUInt32BE(1, 0);
+        hdr.write('mdat', 4, 'latin1');
+        hdr.writeBigUInt64BE(BigInt(16 + dataLen), 8);
+      } else {
+        hdr.writeUInt32BE(8 + dataLen, 0);
+        hdr.write('mdat', 4, 'latin1');
+      }
+      put(hdr);
+      const buf = Buffer.allocUnsafe(8 * 1024 * 1024);
+      const copy = (fromFd, start, len) => {
+        let done = 0;
+        while (done < len) {
+          const n = fs.readSync(fromFd, buf, 0, Math.min(buf.length, len - done), start + done);
+          if (n <= 0) throw new Error('short read');
+          fs.writeSync(fd, buf, 0, n, w);
+          w += n;
+          done += n;
+        }
+      };
+      for (const u of units) {
+        if (u.t === video && vNew) {
+          if (u.count) copy(vfd, vNew[u.first].offset, u.len);
+        } else copy(src.fd, u.off, u.len);
       }
       put(padBytes);
-      return { size: pos, padded: padBytes.length > 0, duplicated: Boolean(audio && dup) };
+      return { size: w, padded: padBytes.length > 0, duplicated: Boolean(audio && dup), rewrittenVideo: Boolean(vNew) };
     } finally {
       fs.closeSync(fd);
+      if (vfd !== null) fs.closeSync(vfd);
+      if (vtmp) fs.rmSync(vtmp, { force: true });
     }
   } finally {
     src.close();

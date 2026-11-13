@@ -61,7 +61,7 @@ export function done(res) {
   const i = res.input;
   const tt = res.plan.method === 'tt';
   const out = tt
-    ? `${String(r.codec || '').toUpperCase()} ${r.width}x${r.height} ${res.plan.fps}fps${res.plan.hdr ? ` HDR-${res.plan.hdr.toUpperCase()}` : ''} — ${res.plan.video === 'copy' ? 'video asal, tanpa encode semula' : 'encode semula (x265)'}`
+    ? `${String(r.codec || '').toUpperCase()} ${r.width}x${r.height} ${res.plan.fps}fps${res.plan.hdr ? ` HDR-${res.plan.hdr.toUpperCase()}` : ''} — ${res.plan.video === 'copy' ? 'video asal, tanpa encode semula' : `encode semula x265 — sebab: ${res.plan.reason || '-'}`}`
     : `H.264 ${r.width}x${r.height} ${res.plan.fps}fps SDR`;
   const lines = [
     `✅ *Siap!* (${Math.round(res.seconds)}s)`,

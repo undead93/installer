@@ -25,8 +25,12 @@ eksportnya sendiri — fail yang dimuat turun terus dari TikTok pun ada tag yang
 `{"TEEditor":"2","te_is_reencode":"1",...}`. Fail yang membawa tag ini nampak seperti sudah diproses
 oleh editor TikTok. Hash `copyright` bukan md5 mana-mana bahagian fail (sudah diuji), jadi nilai rawak digunakan.
 
-Video yang tak boleh disalin (bukan HEVC/H.264, lebih 60fps, atau > 80 Mbps) di-encode semula dengan
-x265 (HDR dikekalkan, maks 60fps, GOP 0.5 s, ~23 Mbps). Kaedah lama (SDR H.264 gaya Haze) masih ada:
+Video yang tak boleh disalin (bukan HEVC/H.264, lebih 60fps, atau > 200 Mbps) di-encode semula dengan
+x265 yang dibentuk seperti eksport HEVC Apple dalam rujukan: ~23 Mbps, maks 60fps, GOP 0.5 s, 3 B-frame,
+AUD gaya Apple (`46 01 xx 80`) pada setiap frame, SEI HRD, scaling list, POC 11-bit, timescale 19200,
+SEI Apple pada keyframe, **RPU Dolby Vision disalin dari video asal** ke frame yang sepadan, nama
+compressor kosong, tanpa `fiel` / SEI x265 / SEI dalam `hvcC`. Audio mono ditukar ke AAC stereo.
+Kapsyen bot menyatakan sebab bila video terpaksa di-encode semula. Kaedah lama (SDR H.264 gaya Haze) masih ada:
 arahan `.max` / `.hd` / `.haze`, atau `METHOD=haze`.
 
 ## 1. Apa beza fail asal dengan fail Haze

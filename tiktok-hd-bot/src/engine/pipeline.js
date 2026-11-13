@@ -8,6 +8,49 @@ import { inspectMp4a } from './aac.js';
 import crypto from 'node:crypto';
 import { muxOutput } from './mux.js';
 import { ttPostProcess } from './ttremux.js';
+import { parseMovie } from './mp4.js';
+
+// Apple VideoToolbox HEVC SEI (user_data_unregistered, Apple UUID) exactly as in the reference file.
+const APPLE_HEVC_SEI_FIRST = Buffer.from('4e01053247564adc5c4c433f94efc5113cd143a80100000300060300000300030203564c000b00000300000300028ed80c03912b010dffffffff80', 'hex');
+const APPLE_HEVC_SEI_KEY = Buffer.from('4e01051547564adc5c4c433f94efc5113cd143a803000003000380', 'hex');
+
+function splitNals(au, lengthSize = 4) {
+  const out = [];
+  for (let p = 0; p + lengthSize <= au.length; ) {
+    const len = au.readUIntBE(p, lengthSize);
+    out.push(au.subarray(p + lengthSize, p + lengthSize + len));
+    p += lengthSize + len;
+  }
+  return out;
+}
+const joinNals = (nals) =>
+  Buffer.concat(
+    nals.flatMap((n) => {
+      const h = Buffer.alloc(4);
+      h.writeUInt32BE(n.length);
+      return [h, n];
+    }),
+  );
+
+/** Presentation times (s) of a track's samples, decode order. */
+function ptsList(track) {
+  const ts = track.mdhd.timescale;
+  const shift = (track.elst || []).find((e) => e.mediaTime >= 0)?.mediaTime ?? 0;
+  return track.samples.map((x) => (x.dts + x.cto - shift) / ts);
+}
+
+/** Dolby Vision RPU NAL (HEVC type 62) of every source frame, with its presentation time. */
+function sourceRpus(movie) {
+  const v = movie?.tracks.find((t) => t.handler === 'vide' && ['hvc1', 'hev1', 'dvh1', 'dvhe'].includes(t.fourcc));
+  if (!v) return [];
+  const pts = ptsList(v);
+  const out = [];
+  v.samples.forEach((x, i) => {
+    const rpu = splitNals(movie.src.read(x.offset, x.size)).find((n) => ((n[0] >> 1) & 63) === 62);
+    if (rpu) out.push({ pts: pts[i], nal: Buffer.from(rpu) });
+  });
+  return out.sort((a, b) => a.pts - b.pts);
+}
 
 export const DEFAULTS = {
   method: 'tt', // tt = keep the original video, package it like a TikTok/CapCut export (reference link file)
@@ -149,8 +192,17 @@ async function processTT(input, output, opts, onProgress, started) {
     const vIndex = streams.find((s) => s.codec_type === 'video' && !s.disposition?.attached_pic).index;
     const aac = streams.find((s) => s.codec_type === 'audio' && s.codec_name === 'aac');
     const anyAudio = streams.find((s) => s.codec_type === 'audio' && s.codec_name && s.codec_name !== 'unknown');
-    const copyVideo = ['hevc', 'h264'].includes(v.codec) && v.fps <= 61 && (!v.bitrate || v.bitrate <= 80e6);
-    const fps = copyVideo ? v.fps : pickFps(v.fps, 60);
+    // Copy whenever possible (that is what the reference does); say why when not.
+    const vs = streams.find((s) => s.index === vIndex);
+    const frames = Number(vs.nb_frames) || 0;
+    const realFps = frames && info.duration ? frames / info.duration : v.fps;
+    let reason = null;
+    if (!['hevc', 'h264'].includes(v.codec)) reason = `codec ${v.codec}`;
+    else if (Math.min(v.fps || 99, realFps || 99) > 61) reason = `${Math.round(Math.min(v.fps, realFps))}fps (TikTok maks 60)`;
+    else if (v.bitrate > 200e6) reason = `bitrate ${Math.round(v.bitrate / 1e6)} Mbps`;
+    const copyVideo = !reason;
+    const fps = copyVideo ? v.fps : pickFps(Math.min(v.fps || 60, realFps || 60), 60);
+    const stereoAac = aac && Number(aac.channels) === 2;
     fs.mkdirSync(opts.workDir, { recursive: true });
     const work = fs.mkdtempSync(path.join(opts.workDir, 'job-'));
     try {
@@ -167,14 +219,20 @@ async function processTT(input, output, opts, onProgress, started) {
         const color = hdr
           ? `colorprim=bt2020:transfer=${v.transfer === 'smpte2084' ? 'smpte2084' : 'arib-std-b67'}:colormatrix=bt2020nc`
           : 'colorprim=bt709:transfer=bt709:colormatrix=bt709';
+        // Shaped like Apple's HEVC export in the reference: ~23 Mbps, 0.5 s GOP, 3 B-frames, AUD, HRD SEI,
+        // default scaling lists, no strong intra smoothing, 11-bit POC LSB.
         args.push(
           '-vf', `fps=${fps}`,
-          '-c:v', 'libx265', '-preset', opts.x265Preset || 'fast', '-crf', '18', '-tag:v', 'hvc1',
+          '-c:v', 'libx265', '-preset', opts.x265Preset || 'fast', '-b:v', '23M', '-tag:v', 'hvc1',
           '-pix_fmt', hdr ? 'yuv420p10le' : 'yuv420p', ...(hdr ? ['-profile:v', 'main10'] : []),
-          '-x265-params', `log-level=error:info=0:keyint=${gop}:min-keyint=${gop}:bframes=3:vbv-maxrate=25000:vbv-bufsize=50000:${color}`,
+          '-x265-params',
+          `log-level=error:info=0:keyint=${gop}:min-keyint=${gop}:bframes=3:vbv-maxrate=33000:vbv-bufsize=33000:aud=1:hrd=1:` +
+            `scaling-list=default:strong-intra-smoothing=0:log2-max-poc-lsb=11:${color}`,
+          '-video_track_timescale', '19200',
         );
       }
-      args.push(aac ? '-c:a' : '-c:a', aac ? 'copy' : 'aac', ...(aac ? [] : ['-b:a', '256k', '-ar', '48000', '-ac', '2']));
+      // Stereo AAC is copied; mono or other audio becomes stereo AAC like the reference.
+      args.push('-c:a', stereoAac ? 'copy' : 'aac', ...(stereoAac ? [] : ['-b:a', '256k', '-ar', '48000', '-ac', '2']));
       args.push(
         '-map_metadata', '-1', '-map_metadata:s:v', '-1', '-map_metadata:s:a', '-1', '-map_chapters', '-1',
         '-metadata', `artist=${opts.metaArtist}`,
@@ -186,7 +244,60 @@ async function processTT(input, output, opts, onProgress, started) {
       );
       await runFfmpeg(args, { duration: info.duration, onProgress: (p) => onProgress({ stage: copyVideo ? 'mux' : 'video', ...p }) });
       onProgress({ stage: 'mux', percent: 100 });
-      ttPostProcess(step1, output, { pad: opts.pad, dup: opts.dupAudio });
+      // Re-encoded video: drop x265's alternative-transfer SEI, add Apple's SEI on keyframes and carry the
+      // source's Dolby Vision RPUs over to the matching frames (by presentation time).
+      let videoTransform = null;
+      let rpuCount = 0;
+      if (!copyVideo) {
+        const enc = parseMovie(step1);
+        try {
+          const vt = enc.tracks.find((t) => t.handler === 'vide');
+          const sync = new Set(vt.samples.map((x, i) => (x.sync ? i : -1)).filter((i) => i >= 0));
+          const outPts = ptsList(vt);
+          const rpus = v.hdr ? sourceRpus(info.movie) : [];
+          const half = 0.5 / fps;
+          const nearest = (t) => {
+            let lo = 0;
+            let hi = rpus.length - 1;
+            while (lo < hi) {
+              const mid = (lo + hi) >> 1;
+              if (rpus[mid].pts < t) lo = mid + 1;
+              else hi = mid;
+            }
+            const cands = [rpus[lo - 1], rpus[lo]].filter(Boolean);
+            const best = cands.reduce((a2, r) => (Math.abs(r.pts - t) < Math.abs(a2.pts - t) ? r : a2), cands[0]);
+            return best && Math.abs(best.pts - t) <= half ? best.nal : null;
+          };
+          const rpuFor = outPts.map((t) => (rpus.length ? nearest(t) : null));
+          rpuCount = rpuFor.filter(Boolean).length;
+          videoTransform = (i, au) => {
+            const out = [];
+            let inserted = false;
+            const nals = splitNals(au);
+            // Apple writes an access unit delimiter on every frame, as 4 bytes (46 01 <pic_type|stop> 80)
+            if (!nals.some((n) => ((n[0] >> 1) & 63) === 35)) out.push(Buffer.from([0x46, 0x01, sync.has(i) ? 0x10 : 0x50, 0x80]));
+            for (const n of nals) {
+              const type = (n[0] >> 1) & 63;
+              if (type === 35) {
+                out.push(Buffer.from([0x46, 0x01, n[2], 0x80]));
+                continue;
+              }
+              if (type === 39 && n[2] === 0x93) continue; // x265 alternative transfer characteristics SEI
+              if (type === 62) continue;
+              if (!inserted && type < 32 && sync.has(i)) {
+                out.push(i === 0 ? APPLE_HEVC_SEI_FIRST : APPLE_HEVC_SEI_KEY);
+                inserted = true;
+              }
+              out.push(n);
+            }
+            if (rpuFor[i]) out.push(rpuFor[i]);
+            return joinNals(out);
+          };
+        } finally {
+          enc.src.close();
+        }
+      }
+      ttPostProcess(step1, output, { pad: opts.pad, dup: opts.dupAudio, videoTransform });
       const check = await ffprobe(output);
       const vOut = (check.streams || []).find((s) => s.codec_type === 'video');
       if (!vOut) throw new Error('Semakan output gagal (tiada video).');
@@ -204,7 +315,7 @@ async function processTT(input, output, opts, onProgress, started) {
           spatialAudio: false,
           hadGps: info.apple.hasGps,
         },
-        plan: { method: 'tt', video: copyVideo ? 'copy' : 'x265', fps: Math.round(fps), hdr: v.hdr, audio: aac ? 'copy' : 'aac' },
+        plan: { method: 'tt', video: copyVideo ? 'copy' : 'x265', reason, fps: Math.round(fps), hdr: v.hdr, audio: stereoAac ? 'copy' : 'aac stereo', dolbyVisionRpus: rpuCount },
         result: {
           size: fs.statSync(output).size,
           width: vOut.width,
