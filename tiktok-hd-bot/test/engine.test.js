@@ -89,6 +89,34 @@ test('iPhone-style HDR source: tone mapped, 30 fps, AAC passthrough + padding + 
     out.src.close();
   }
 
+  // Apple-style bitstream: Apple SEI on every keyframe, nal_ref_idc 1, SPS/PPS headers 0x27/0x28
+  const o2 = parseMovie(output);
+  try {
+    const v = o2.tracks.find((t) => t.handler === 'vide');
+    const nals = (i) => {
+      const b = o2.src.read(v.samples[i].offset, v.samples[i].size);
+      const out = [];
+      for (let p = 0; p + 4 < b.length; p += 4 + b.readUInt32BE(p)) out.push(b.subarray(p + 4, p + 4 + b.readUInt32BE(p)));
+      return out;
+    };
+    const first = nals(0);
+    assert.equal(first[0][0], 0x06, 'SEI before the first slice');
+    assert.ok(first[0].includes(Buffer.from('47564adc5c4c433f94efc5113cd143a8', 'hex')), 'Apple encoder UUID');
+    // byte-identical to the SEI NAL units in the reference files
+    assert.equal(first[0].toString('hex'), '06052d47564adc5c4c433f94efc5113cd143a8010000030006030000030003020339d2000b00000300000300001d600c03912b0180');
+    const k2 = v.samples.findIndex((x, i) => i > 0 && x.sync);
+    assert.equal(nals(k2)[0].toString('hex'), '06051547564adc5c4c433f94efc5113cd143a803000003000380');
+    for (let i = 0; i < v.samples.length; i++) for (const n of nals(i)) assert.ok(((n[0] >> 5) & 3) <= 1, 'nal_ref_idc is 0 or 1');
+    const entry = v.stsdEntries[0];
+    const avcC = entry.subarray(entry.indexOf('avcC') - 4);
+    assert.equal(avcC[8 + 8], 0x27, 'SPS header like Apple');
+    const a1 = o2.tracks[0];
+    const pce = a1.stsdEntries[1].toString('hex');
+    assert.ok(pce.includes('118004c040002000'), 'second sample description = PCE stereo config');
+  } finally {
+    o2.src.close();
+  }
+
   const bytes = fs.readFileSync(output);
   assert.equal(bytes.includes('x264'), false, 'x264 SEI banner removed');
   assert.equal(bytes.includes('Lavf'), false);
@@ -116,6 +144,28 @@ test('clean copy from the same encode: same video bytes, no duplicate AAC, no si
     c.src.close();
   }
   execFileSync('ffmpeg', ['-v', 'error', '-xerror', '-i', clean, '-map', '0', '-f', 'null', '-']);
+});
+
+test('mono AAC is padded too: 17 four-byte silent frames, PCE mono config on the last 8', async () => {
+  const input = path.join(dir, 'mono.mov');
+  ff('-f', 'lavfi', '-i', 'testsrc2=s=1920x1080:r=30', '-f', 'lavfi', '-i', 'sine=f=440:r=48000', '-t', '1',
+    '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-ac', '1', input);
+  const output = path.join(dir, 'mono_hd.mp4');
+  await processVideo(input, output, { ...FAST, mode: 'keep' });
+  const m = parseMovie(output);
+  try {
+    assert.deepEqual(m.topLevel, ['ftyp', 'wide', 'mdat', 'mdat', 'moov']);
+    const a = m.tracks[0];
+    const tail = a.samples.slice(-17);
+    assert.ok(tail.every((x) => x.size === 4));
+    assert.equal(m.src.read(tail[0].offset, 4).toString('hex'), '01182007');
+    assert.deepEqual(tail.map((x) => x.sdi), [...Array(9).fill(1), ...Array(8).fill(2)]);
+    assert.ok(a.stsdEntries[1].toString('hex').includes('118804c040000000'.replace('8804', '8004')), 'PCE mono config');
+    assert.equal(a.elng, null, 'no elng invented when the source has none');
+  } finally {
+    m.src.close();
+  }
+  execFileSync('ffmpeg', ['-v', 'error', '-xerror', '-i', output, '-map', '0', '-f', 'null', '-']);
 });
 
 test('SDR full-range source with MP3: upscaled to 4K, audio transcoded to AAC', async () => {

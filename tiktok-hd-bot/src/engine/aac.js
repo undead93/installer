@@ -3,8 +3,42 @@ import { findInSampleEntry } from './mp4.js';
 
 const SAMPLE_RATES = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350];
 
-/** A digitally silent AAC-LC channel-pair (stereo) raw data block, 6 bytes. */
-export const SILENT_STEREO_FRAME = Buffer.from('211004608c1c', 'hex');
+/** Digitally silent AAC-LC raw data blocks, exactly as found in the reference files' padding. */
+export const SILENT_STEREO_FRAME = Buffer.from('211004608c1c', 'hex'); // one channel pair element
+export const SILENT_MONO_FRAME = Buffer.from('01182007', 'hex'); // one single channel element
+
+/**
+ * AudioSpecificConfig with channelConfiguration 0 and an explicit program_config_element holding one
+ * side element (SCE for mono, CPE for stereo) — the second sample description of the reference files
+ * (mono 118004c040000000, stereo 118004c040002000 at 48 kHz).
+ */
+export function pceAsc(sfi, channels) {
+  const bits = [];
+  const put = (v, n) => {
+    for (let i = n - 1; i >= 0; i--) bits.push((v >> i) & 1);
+  };
+  put(2, 5); // AAC-LC
+  put(sfi, 4);
+  put(0, 4); // channelConfiguration 0 -> PCE follows
+  put(0, 3); // frameLengthFlag, dependsOnCoreCoder, extensionFlag
+  put(0, 4); // element_instance_tag
+  put(1, 2); // object_type (LC)
+  put(sfi, 4);
+  put(0, 4); // front elements
+  put(1, 4); // side elements
+  put(0, 4); // back elements
+  put(0, 2); // lfe
+  put(0, 3); // assoc data
+  put(0, 4); // valid cc
+  put(0, 3); // mono/stereo/matrix mixdown flags
+  put(channels === 2 ? 1 : 0, 1); // side element is_cpe
+  put(0, 4); // tag select
+  while (bits.length % 8) bits.push(0); // byte_alignment
+  put(0, 8); // comment_field_bytes
+  const out = Buffer.alloc(bits.length / 8);
+  bits.forEach((b, i) => (out[i >> 3] |= b << (7 - (i & 7))));
+  return out;
+}
 
 function readDescLen(buf, p) {
   let len = 0;

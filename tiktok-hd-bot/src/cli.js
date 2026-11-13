@@ -16,13 +16,14 @@ Pilihan:
   --mode max|hd|keep    max = 4K 2160p (lalai), hd = 1080p, keep = resolusi asal
   --fps 30|60           had fps (lalai 30, tidak pernah gandakan frame)
   --preset <nama>       preset x264: veryfast, faster, fast, medium (lalai), slow
-  --crf <n>             kualiti x264 (lalai 17), dihadkan oleh --maxrate
+  --crf <n>             kualiti x264 (lalai 16), dihadkan oleh --maxrate & lantai QP 21
   --maxrate <n>         contoh 11M (lalai ikut resolusi)
   --tag <teks>          teks tag encoder (©too)
   --no-pad              jangan tambah 17 frame AAC senyap
   --no-dup-audio        jangan gandakan trek AAC
   --no-apple-tracks     buang trek metadata kamera iPhone (mebx/APAC)
   --clean-copy <fail>   tulis juga salinan "bersih" (tanpa AAC pendua & frame senyap) dari encode yang sama
+  --no-apple-sei        jangan tambah SEI encoder Apple / nal_ref_idc gaya Apple
   --json                cetak kemajuan & keputusan sebagai baris JSON`;
 
 function parseArgs(argv) {
@@ -117,6 +118,7 @@ async function main() {
     pad: args.pad !== false,
     dupAudio: args['dup-audio'] !== false,
     keepAppleTracks: args['apple-tracks'] !== false,
+    appleBitstream: args['apple-sei'] !== false,
     variants: args['clean-copy'] ? [{ output: args['clean-copy'], pad: false, dupAudio: false }] : undefined,
   };
   let lastPrint = 0;

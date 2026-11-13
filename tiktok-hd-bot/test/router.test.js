@@ -95,13 +95,13 @@ test('default = group only: a document in the group comes back converted, quotin
   await handle(gm(doc('')));
   assert.equal(calls.engine.length, 1);
   assert.equal(calls.engine[0].opts.mode, 'max');
-  assert.equal(calls.engine[0].opts.pad, false, 'clean iPhone-style container by default');
-  assert.equal(calls.engine[0].opts.dupAudio, false);
+  assert.equal(calls.engine[0].opts.pad, true, 'full reference layout by default');
+  assert.equal(calls.engine[0].opts.dupAudio, true);
   const file = sent.find((s) => s.content.document);
   assert.ok(file, 'result document sent');
   assert.equal(file.chat, GROUP);
-  assert.equal(file.content.mimetype, 'video/quicktime', 'QuickTime content goes out as .mov');
-  assert.equal(file.content.fileName, 'IMG_1880_hd.mov');
+  assert.equal(file.content.mimetype, 'application/octet-stream', 'sent as a plain file so iPhone WhatsApp downloads it as-is');
+  assert.equal(file.content.fileName, 'IMG_1880_hd.mp4');
   assert.ok(file.options.quoted, 'quotes the original message');
   assert.deepEqual(file.content.mentions, ['201234567890123@lid']);
   assert.match(file.content.caption, /^@201234567890123 ✅ \*Siap!\*/);
@@ -153,7 +153,7 @@ test('private: document with ".hd" caption is processed and returned as a docume
   assert.equal(calls.engine[0].opts.mode, 'hd');
   assert.match(calls.engine[0].input, /input\.mov$/);
   const file = sent.find((s) => s.content.document);
-  assert.equal(file.content.fileName, 'IMG_1880_hd.mov');
+  assert.equal(file.content.fileName, 'IMG_1880_hd.mp4');
   assert.equal(file.content.mentions, undefined, 'no tag in private chats');
   assert.match(file.content.caption, /^✅ \*Siap!\*/);
 });
@@ -221,18 +221,18 @@ test('one job per user: a second video while the first runs is refused politely'
 
 // ---------------------------------------------------------------- delivery format + .uji diagnostics
 
-test('DOC_FORMAT=mp4 + OUTPUT_STYLE=haze restore the reference layout; per-message "bersih"/"haze" override', async () => {
-  const { handle, sent, calls } = setup({ config: { docFormat: 'mp4', outputStyle: 'haze' } });
+test('DOC_FORMAT=mov + DOC_MIME=video + OUTPUT_STYLE=clean; per-message "bersih"/"haze" override', async () => {
+  const { handle, sent, calls } = setup({ config: { docFormat: 'mov', docMime: 'video', outputStyle: 'clean' } });
   await handle(gm(doc('')));
-  assert.equal(calls.engine[0].opts.pad, true);
-  assert.equal(calls.engine[0].opts.dupAudio, true);
+  assert.equal(calls.engine[0].opts.pad, false);
+  assert.equal(calls.engine[0].opts.dupAudio, false);
   const file = sent.find((s) => s.content.document);
-  assert.equal(file.content.fileName, 'IMG_1880_hd.mp4');
-  assert.equal(file.content.mimetype, 'video/mp4');
-  const b = setup({ config: { outputStyle: 'haze' } });
+  assert.equal(file.content.fileName, 'IMG_1880_hd.mov');
+  assert.equal(file.content.mimetype, 'video/quicktime');
+  const b = setup();
   await b.handle(gm(doc('.max bersih')));
   assert.equal(b.calls.engine[0].opts.pad, false);
-  const c = setup();
+  const c = setup({ config: { outputStyle: 'clean' } });
   await c.handle(gm(doc('.max haze')));
   assert.equal(c.calls.engine[0].opts.dupAudio, true);
 });

@@ -56,7 +56,7 @@ export function parseCommand(text, prefix) {
 }
 
 export function optionsFrom(config, mode, args = []) {
-  const haze = config.outputStyle === 'haze';
+  const haze = (config.outputStyle || 'haze') === 'haze';
   const opts = { mode, fps: config.defaultFps, preset: config.preset, crf: config.crf, pad: haze, dupAudio: haze };
   for (const a of args) {
     if (/^60(fps)?$/.test(a)) opts.fps = 60;
@@ -69,10 +69,15 @@ export function optionsFrom(config, mode, args = []) {
   return opts;
 }
 
-/** Name + MIME type of the reply document. QuickTime content goes out as .mov / video/quicktime by default. */
+/**
+ * Name + MIME type of the reply document. Default: .mp4 sent as application/octet-stream — iPhone WhatsApp
+ * then downloads the file as-is (it refused the same bytes sent as video/mp4), and iOS still offers
+ * "Save Video" from the .mp4 extension.
+ */
 export function replyFile(config, node) {
-  const ext = config.docFormat === 'mp4' ? '.mp4' : '.mov';
-  return { fileName: `${baseFor(node)}_hd${ext}`, mimetype: ext === '.mov' ? 'video/quicktime' : 'video/mp4' };
+  const ext = config.docFormat === 'mov' ? '.mov' : '.mp4';
+  const mimetype = config.docMime === 'video' ? (ext === '.mov' ? 'video/quicktime' : 'video/mp4') : 'application/octet-stream';
+  return { fileName: `${baseFor(node)}_hd${ext}`, mimetype };
 }
 
 /**
@@ -181,8 +186,8 @@ export function createRouter(deps) {
       const files = [
         { label: 'A', file: hazeOut, fileName: `A_${base}_haze.mp4`, mimetype: 'video/mp4', desc: 'gaya Haze penuh, .mp4 (format lama bot)' },
         { label: 'B', file: hazeOut, fileName: `B_${base}_haze.mov`, mimetype: 'video/quicktime', desc: 'gaya Haze penuh, .mov' },
-        { label: 'C', file: cleanOut, fileName: `C_${base}_bersih.mov`, mimetype: 'video/quicktime', desc: 'gaya iPhone bersih, .mov (lalai baharu)' },
-        { label: 'D', file: hazeOut, fileName: `D_${base}_haze.mp4`, mimetype: 'application/octet-stream', desc: 'gaya Haze penuh, dihantar sebagai fail biasa' },
+        { label: 'C', file: cleanOut, fileName: `C_${base}_bersih.mov`, mimetype: 'video/quicktime', desc: 'gaya iPhone bersih, .mov' },
+        { label: 'D', file: hazeOut, fileName: `D_${base}_haze.mp4`, mimetype: 'application/octet-stream', desc: 'gaya Haze penuh, dihantar sebagai fail biasa (lalai)' },
       ];
       const original = toNum(media.node.fileLength) || fs.statSync(input).size;
       if (original <= 64 * 1048576) {

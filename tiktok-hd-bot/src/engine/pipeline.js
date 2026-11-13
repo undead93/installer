@@ -11,11 +11,12 @@ export const DEFAULTS = {
   mode: 'max', // max = 2160p (4K) | hd = 1080p | keep = source resolution (max 2160p)
   fps: 30, // upper limit; never duplicates frames (60 allowed)
   preset: 'medium', // x264 preset: veryfast/faster/fast/medium/slow
-  crf: 17, // quality target, capped by maxrate
+  crf: 16, // quality target; with qpmin 21 the floor below decides on easy content, maxrate on hard content
   maxrate: 0, // 0 = auto by resolution (4K ≈ 11 Mbps, same ceiling as the reference file)
   pad: true, // append 17 silent AAC frames in a tail mdat (reference-file quirk)
   dupAudio: true, // duplicate AAC track sharing the same data (reference-file quirk)
   keepAppleTracks: true, // pass through iPhone APAC + mebx camera metadata tracks
+  appleBitstream: true, // Apple encoder SEI + nal_ref_idc like VideoToolbox output
   encoderTag: 'TikTok HD Bot',
   workDir: path.join(os.tmpdir(), 'tiktok-hd'),
 };
@@ -101,7 +102,12 @@ export function makePlan(info, opts, caps) {
     maxrate,
     // 1 s closed GOP, 3 B-frames with pyramid, 4 refs, CABAC + 8x8 transform (High profile), no weighted P —
     // the bitstream shape of the reference file, whatever x264 preset is chosen.
-    x264Params: `keyint=${fps}:min-keyint=${fps}:scenecut=0:bframes=3:b-adapt=0:b-pyramid=normal:ref=4:weightp=0:open-gop=0:cabac=1:8x8dct=1`,
+    // Rate control modelled on Apple's encoder in the reference files: a quality floor (slice QP never
+    // under 21, as in their I-frames), I/P/B QP steps of about +6/+4, no psy/mbtree "grain keeping",
+    // capped at maxrate. Calibrated: 11.0 Mbps on IMG_1880 (reference 11.08), ~4–5 Mbps on IMG_1913 (4.16).
+    x264Params:
+      `keyint=${fps}:min-keyint=${fps}:scenecut=0:bframes=3:b-adapt=0:b-pyramid=normal:ref=4:weightp=0:open-gop=0:cabac=1:8x8dct=1` +
+      ':ipratio=2.0:pbratio=1.6:mbtree=0:psy-rd=0.0,0.0:aq-strength=0.5:qpmin=21',
     audio,
   };
 }
@@ -160,6 +166,7 @@ export async function processVideo(input, output, options = {}, onProgress = () 
           pad: v.pad ?? opts.pad,
           dupAudio: v.dupAudio ?? opts.dupAudio,
           keepAppleTracks: v.keepAppleTracks ?? opts.keepAppleTracks,
+          appleBitstream: opts.appleBitstream,
         });
       const report = mux(output);
       // Extra containers from the same encode (e.g. a "clean" copy for comparison) — remuxing is cheap.

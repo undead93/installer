@@ -243,6 +243,7 @@ function copyRange(fd, src, start, len, pos) {
 function writeChunk(fd, chunk, pos) {
   const s = chunk.samples;
   let i = 0;
+  const special = (x) => x.data || x.prefix || x.patch;
   while (i < s.length) {
     const a = s[i];
     if (a.data) {
@@ -251,9 +252,19 @@ function writeChunk(fd, chunk, pos) {
       i++;
       continue;
     }
+    if (a.prefix || a.patch) {
+      // Rewritten sample: [prefix bytes] + source bytes passed through patch(). Size is fixed in advance.
+      const body = a.src.read(a.offset, a.size - (a.prefix?.length || 0));
+      if (a.patch) a.patch(body);
+      const out = a.prefix ? Buffer.concat([a.prefix, body]) : body;
+      fs.writeSync(fd, out, 0, out.length, pos);
+      pos += out.length;
+      i++;
+      continue;
+    }
     let len = a.size;
     let j = i + 1;
-    while (j < s.length && !s[j].data && s[j].src === a.src && s[j].offset === a.offset + len) {
+    while (j < s.length && !special(s[j]) && s[j].src === a.src && s[j].offset === a.offset + len) {
       len += s[j].size;
       j++;
     }

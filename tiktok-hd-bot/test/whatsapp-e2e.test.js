@@ -109,8 +109,8 @@ test('group: document video in -> converted document out', async () => {
   assert.equal(reply.options.quoted, incoming, 'reply quotes the user message');
   const docMsg = reply.message.documentMessage || reply.message.documentWithCaptionMessage?.message?.documentMessage;
   assert.ok(docMsg, 'WhatsApp document message generated');
-  assert.equal(docMsg.mimetype, 'video/quicktime');
-  assert.equal(docMsg.fileName, 'IMG_TEST_hd.mov');
+  assert.equal(docMsg.mimetype, 'application/octet-stream');
+  assert.equal(docMsg.fileName, 'IMG_TEST_hd.mp4');
   assert.match(docMsg.caption, /^@201234567890123 ✅ \*Siap!\*/);
   assert.deepEqual(docMsg.contextInfo?.mentionedJid, ['201234567890123@lid'], 'sender is tagged in the group');
   assert.ok(sent.some((s) => s.content.edit && s.message.protocolMessage), 'progress edits are valid edit messages');

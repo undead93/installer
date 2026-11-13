@@ -1,13 +1,13 @@
 // Builds the final iPhone-style QuickTime file:
-//   track 1  AAC (original packets, passthrough) + 17 silent frames in a tail mdat
+//   track 1  AAC (original packets, passthrough) + 17 silent frames in a tail mdat (mono or stereo)
 //   track 2  APAC spatial audio (passthrough, disabled, 'fall' -> AAC)      [iPhone sources]
 //   track 3  new H.264 video (timescale 600, signed ctts + cslg, sdtp, tapt)
 //   track 4+ Apple camera timed metadata 'mebx' (passthrough)              [iPhone sources]
 //   last     duplicate of the AAC track sharing the same chunks
 // No make/model/date/GPS is written; mvhd/tkhd times are zero.
 import { parseMovie } from './mp4.js';
-import { inspectMp4a, buildEsds, buildMp4aEntry, SILENT_STEREO_FRAME } from './aac.js';
-import { isVcl, nalDependency } from './h264.js';
+import { inspectMp4a, buildEsds, buildMp4aEntry, pceAsc, SILENT_STEREO_FRAME, SILENT_MONO_FRAME } from './aac.js';
+import { isVcl, nalDependency, APPLE_SEI_FIRST, APPLE_SEI_KEYFRAME, lengthPrefixed, appleNalRefIdc, appleAvcC } from './h264.js';
 import {
   box,
   fullBox,
@@ -81,7 +81,7 @@ function trimGroups(groups, keep, extra = 0) {
 
 const firstMediaTime = (elst) => (elst || []).find((e) => e.mediaTime >= 0)?.mediaTime ?? 0;
 
-export function muxOutput({ output, videoPath, audioPath, original, plan, encoderTag, pad = true, dupAudio = true, keepAppleTracks = true }) {
+export function muxOutput({ output, videoPath, audioPath, original, plan, encoderTag, pad = true, dupAudio = true, keepAppleTracks = true, appleBitstream = true }) {
   const opened = [];
   const open = (p) => {
     const m = parseMovie(p);
@@ -106,13 +106,21 @@ export function muxOutput({ output, videoPath, audioPath, original, plan, encode
       throw new Error('avcC tidak dijumpai dalam output x264');
     })();
     const lengthSize = (avcCBox[12] & 3) + 1;
-    const vSamples = vt.samples.map((s) => {
+    // Make the x264 bitstream look like Apple's hardware encoder output: Apple SEI before the slice of
+    // the first frame and of every keyframe, and nal_ref_idc = 1 on reference NALs (lossless rewrite).
+    const seiFirst = lengthPrefixed(APPLE_SEI_FIRST);
+    const seiKey = lengthPrefixed(APPLE_SEI_KEYFRAME);
+    const patch = appleBitstream && lengthSize === 4 ? (au) => appleNalRefIdc(au, lengthSize) : undefined;
+    const vSamples = vt.samples.map((s, i) => {
       const dts = Math.round(s.dts * scale);
       const pts = Math.round((s.dts + s.cto - shift) * scale);
+      const prefix = patch && s.sync ? (i === 0 ? seiFirst : seiKey) : undefined;
       return {
         src: vMovie.src,
         offset: s.offset,
-        size: s.size,
+        size: s.size + (prefix?.length || 0),
+        prefix,
+        patch,
         dts,
         dur: Math.round(s.dur * scale),
         cto: pts - dts,
@@ -158,21 +166,25 @@ export function muxOutput({ output, videoPath, audioPath, original, plan, encode
       const endTs = Math.round(videoSeconds * ts);
       const kept = at.samples.filter((s) => s.dts - mediaTime < endTs);
       const samples = kept.map((s) => ({ src: movie.src, offset: s.offset, size: s.size, dts: s.dts, dur: s.dur, cto: 0, sync: true, sdi: 1 }));
-      const canPad = pad && info.asc.aot === 2 && info.channels === 2 && samples.length > 0;
+      // Reference files append 17 silent frames (9 with the normal config, 8 with a PCE config) to mono and stereo AAC.
+      const silent = info.channels === 2 ? SILENT_STEREO_FRAME : info.channels === 1 ? SILENT_MONO_FRAME : null;
+      const canPad = pad && silent && info.asc.aot === 2 && samples.length > 0;
       const padCount = canPad ? PAD_FRAMES : 0;
       let t = samples.length ? samples[samples.length - 1].dts + samples[samples.length - 1].dur : 0;
       const frameDur = samples[0]?.dur || 1024;
       for (let k = 0; k < padCount; k++) {
-        samples.push({ data: SILENT_STEREO_FRAME, size: SILENT_STEREO_FRAME.length, dts: t, dur: frameDur, cto: 0, sync: true, sdi: k < 9 ? 1 : 2, tail: true });
+        samples.push({ data: silent, size: silent.length, dts: t, dur: frameDur, cto: 0, sync: true, sdi: k < 9 ? 1 : 2, tail: true });
         t += frameDur;
       }
-      const esds = buildEsds({
-        asc: info.esds.asc,
+      const esdsFields = {
         bufferSizeDB: info.esds.bufferSizeDB || 6144,
         maxBitrate: info.esds.maxBitrate || 192000,
         avgBitrate: info.esds.avgBitrate || 0,
-      });
-      const entry = buildMp4aEntry({ channels: info.channels, sampleRate: info.sampleRate, esds });
+      };
+      const entry = buildMp4aEntry({ channels: info.channels, sampleRate: info.sampleRate, esds: buildEsds({ asc: info.esds.asc, ...esdsFields }) });
+      const pceEntry = padCount
+        ? buildMp4aEntry({ channels: info.channels, sampleRate: info.sampleRate, esds: buildEsds({ asc: pceAsc(info.asc.sfi, info.channels), ...esdsFields }) })
+        : null;
       const hasRoll = at.groups.sbgp.some((g) => g.type === 'roll');
       const groups = hasRoll ? trimGroups(at.groups, kept.length, padCount) : rollGroups(kept.length, padCount);
       const mediaDur = samples.reduce((a, s) => a + s.dur, 0);
@@ -184,11 +196,11 @@ export function muxOutput({ output, videoPath, audioPath, original, plan, encode
         timescale: ts,
         language: 0x55c4,
         samples,
-        stsdEntries: padCount ? [entry, entry] : [entry],
+        stsdEntries: padCount ? [entry, pceEntry] : [entry],
         tkhd: { flags: 15, layer: 0, altGroup: 1, volume: 0x100, matrix: IDENTITY, width: 0, height: 0 },
-        elst: [{ segDur: Math.floor(((mediaDur - mediaTime) / ts) * MOVIE_TS), mediaTime, rate: 1 }],
+        elst: [{ segDur: Math.round(((mediaDur - mediaTime) / ts) * MOVIE_TS), mediaTime, rate: 1 }],
         tref: [],
-        elng: at.elng || box('elng', u32(0), Buffer.from('und\0', 'latin1')),
+        elng: at.elng, // only when the source has one, like the reference files
         mediaHeader: soundMediaHeader(),
         sgpd: groups.sgpd,
         sbgp: groups.sbgp,
@@ -238,9 +250,9 @@ export function muxOutput({ output, videoPath, audioPath, original, plan, encode
       timescale: VIDEO_TS,
       language: 0x55c4,
       samples: vSamples,
-      stsdEntries: [avc1Entry(codedW, codedH, avcCBox)],
+      stsdEntries: [avc1Entry(codedW, codedH, patch ? appleAvcC(avcCBox) : avcCBox)],
       tkhd: { flags: 15, layer: 0, altGroup: 0, volume: 0, matrix, width: codedW, height: codedH },
-      elst: [{ segDur: Math.floor(videoSeconds * MOVIE_TS), mediaTime: 0, rate: 1 }],
+      elst: [{ segDur: Math.round(videoSeconds * MOVIE_TS), mediaTime: 0, rate: 1 }],
       tref: [],
       tapt: trackAperture(codedW, codedH),
       elng: null,
@@ -288,7 +300,8 @@ export function muxOutput({ output, videoPath, audioPath, original, plan, encode
       if (!t.trefSrc) continue;
       t.tref = t.trefSrc
         .map((r) => ({ type: r.type, ids: r.ids.map((id) => ids.get(id)).filter(Boolean) }))
-        .filter((r) => r.ids.length);
+        .filter((r) => r.ids.length)
+        .sort((a, b) => (a.type < b.type ? -1 : 1)); // AVFoundation writes reference types in sorted order
       delete t.trefSrc;
     }
 
