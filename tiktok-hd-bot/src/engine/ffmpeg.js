@@ -50,6 +50,7 @@ export async function detectCaps() {
   const has = (text, name) => new RegExp(`\\s${name}\\s`).test(text);
   capsCache = {
     x264: has(enc.stdout, 'libx264'),
+    x265: has(enc.stdout, 'libx265'),
     aac: has(enc.stdout, 'aac'),
     zscale: has(flt.stdout, 'zscale'),
     tonemap: has(flt.stdout, 'tonemap'),
@@ -63,12 +64,15 @@ export async function detectCaps() {
  * Run ffmpeg with machine-readable progress. `duration` (seconds) is used to
  * turn out_time into a percentage.
  */
-export async function runFfmpeg(args, { duration = 0, onProgress, signal } = {}) {
+export async function runFfmpeg(args, { duration = 0, onProgress, onLine, signal } = {}) {
   const state = {};
-  const full = ['-hide_banner', '-nostdin', '-y', '-loglevel', 'error', '-progress', 'pipe:1', '-nostats', ...args];
+  // With onLine the caller reads ffmpeg's own stdout output (e.g. framemd5), so no progress reports.
+  const progress = onLine ? [] : ['-progress', 'pipe:1'];
+  const full = ['-hide_banner', '-nostdin', '-y', '-loglevel', 'error', ...progress, '-nostats', ...args];
   const { code, stderr } = await run(FFMPEG, full, {
     signal,
     onStdoutLine: (line) => {
+      if (onLine) return onLine(line);
       const i = line.indexOf('=');
       if (i < 0) return;
       const k = line.slice(0, i).trim();

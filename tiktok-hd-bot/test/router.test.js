@@ -222,17 +222,17 @@ test('one job per user: a second video while the first runs is refused politely'
 // ---------------------------------------------------------------- delivery format + .uji diagnostics
 
 test('DOC_FORMAT=mov + DOC_MIME=video + OUTPUT_STYLE=clean; per-message "bersih"/"haze" override', async () => {
-  const { handle, sent, calls } = setup({ config: { docFormat: 'mov', docMime: 'video', outputStyle: 'clean' } });
+  const { handle, sent, calls } = setup({ config: { method: 'haze', docFormat: 'mov', docMime: 'video', outputStyle: 'clean' } });
   await handle(gm(doc('')));
   assert.equal(calls.engine[0].opts.pad, false);
   assert.equal(calls.engine[0].opts.dupAudio, false);
   const file = sent.find((s) => s.content.document);
   assert.equal(file.content.fileName, 'IMG_1880_hd.mov');
   assert.equal(file.content.mimetype, 'video/quicktime');
-  const b = setup();
+  const b = setup({ config: { method: 'haze' } });
   await b.handle(gm(doc('.max bersih')));
   assert.equal(b.calls.engine[0].opts.pad, false);
-  const c = setup({ config: { outputStyle: 'clean' } });
+  const c = setup({ config: { method: 'haze', outputStyle: 'clean' } });
   await c.handle(gm(doc('.max haze')));
   assert.equal(c.calls.engine[0].opts.dupAudio, true);
 });
@@ -262,4 +262,17 @@ test('".uji" skips the original-file control when the original is big', async ()
   const names = sent.filter((s) => s.content.document).map((d) => d.content.fileName);
   assert.equal(names.length, 4);
   assert.ok(!names.some((n) => n.startsWith('E_')));
+});
+
+test('default method is tt (copy + TikTok editor tags); .max/.hd/.haze switch to re-encoding, .tt back', async () => {
+  const a = setup();
+  await a.handle(gm(doc('')));
+  assert.equal(a.calls.engine[0].opts.method, 'tt');
+  const b = setup();
+  await b.handle(gm(doc('.max')));
+  assert.equal(b.calls.engine[0].opts.method, 'haze');
+  assert.equal(b.calls.engine[0].opts.mode, 'max');
+  const c = setup({ config: { method: 'haze' } });
+  await c.handle(gm(doc('.tt')));
+  assert.equal(c.calls.engine[0].opts.method, 'tt');
 });

@@ -5,7 +5,9 @@
 //   track 4+ Apple camera timed metadata 'mebx' (passthrough)              [iPhone sources]
 //   last     duplicate of the AAC track sharing the same chunks
 // No make/model/date/GPS is written; mvhd/tkhd times are zero.
-import { parseMovie } from './mp4.js';
+import fs from 'node:fs';
+import { parseMovie, Source } from './mp4.js';
+import { parseSps, parsePps, appleSps, APPLE_PPS, transplantBlocker, createSliceRewriter, buildAvcC } from './avc.js';
 import { inspectMp4a, buildEsds, buildMp4aEntry, pceAsc, SILENT_STEREO_FRAME, SILENT_MONO_FRAME } from './aac.js';
 import { isVcl, nalDependency, APPLE_SEI_FIRST, APPLE_SEI_KEYFRAME, lengthPrefixed, appleNalRefIdc, appleAvcC } from './h264.js';
 import {
@@ -81,7 +83,58 @@ function trimGroups(groups, keep, extra = 0) {
 
 const firstMediaTime = (elst) => (elst || []).find((e) => e.mediaTime >= 0)?.mediaTime ?? 0;
 
-export function muxOutput({ output, videoPath, audioPath, original, plan, encoderTag, pad = true, dupAudio = true, keepAppleTracks = true, appleBitstream = true }) {
+/**
+ * Rewrite the x264 stream so it decodes identically under Apple's SPS/PPS (see avc.js), with Apple's SEI
+ * on keyframes. Writes the new access units to outPath; returns null (with a reason) if not possible.
+ */
+function appleTransplant(vMovie, vt, avcCBox, outPath, fps) {
+  const nsps = avcCBox[13] & 0x1f;
+  if (nsps !== 1) return { reason: 'avcC SPS count' };
+  const spsLen = avcCBox.readUInt16BE(14);
+  const spsNal = avcCBox.subarray(16, 16 + spsLen);
+  const ppsLen = avcCBox.readUInt16BE(17 + spsLen);
+  const ppsNal = avcCBox.subarray(19 + spsLen, 19 + spsLen + ppsLen);
+  const sps = parseSps(spsNal);
+  const pps = parsePps(ppsNal);
+  const blocker = transplantBlocker(sps, pps);
+  if (blocker) return { reason: blocker };
+  const rw = createSliceRewriter(sps, pps);
+  const fd = fs.openSync(outPath, 'w');
+  const samples = [];
+  let pos = 0;
+  try {
+    vt.samples.forEach((s, i) => {
+      const au = vMovie.src.read(s.offset, s.size);
+      const nals = [];
+      if (s.sync) nals.push(i === 0 ? APPLE_SEI_FIRST : APPLE_SEI_KEYFRAME);
+      let first = true;
+      for (let p = 0; p + 4 <= au.length; ) {
+        const len = au.readUInt32BE(p);
+        const nal = au.subarray(p + 4, p + 4 + len);
+        p += 4 + len;
+        const type = nal[0] & 31;
+        if (type === 1 || type === 5) {
+          nals.push(rw.rewrite(nal, first));
+          first = false;
+        } else if (type !== 6 && type !== 9 && type !== 7 && type !== 8) {
+          nals.push(nal); // anything unexpected is kept as-is
+        }
+      }
+      const out = Buffer.concat(nals.map(lengthPrefixed));
+      fs.writeSync(fd, out, 0, out.length, pos);
+      samples.push({ offset: pos, size: out.length });
+      pos += out.length;
+    });
+  } catch (err) {
+    fs.closeSync(fd);
+    fs.rmSync(outPath, { force: true });
+    return { reason: err.message };
+  }
+  fs.closeSync(fd);
+  return { path: outPath, samples, avcC: buildAvcC(appleSps(sps, fps), APPLE_PPS) };
+}
+
+export function muxOutput({ output, videoPath, audioPath, original, plan, encoderTag, pad = true, dupAudio = true, keepAppleTracks = true, appleBitstream = true, appleHeaders = true }) {
   const opened = [];
   const open = (p) => {
     const m = parseMovie(p);
@@ -110,15 +163,32 @@ export function muxOutput({ output, videoPath, audioPath, original, plan, encode
     // the first frame and of every keyframe, and nal_ref_idc = 1 on reference NALs (lossless rewrite).
     const seiFirst = lengthPrefixed(APPLE_SEI_FIRST);
     const seiKey = lengthPrefixed(APPLE_SEI_KEYFRAME);
-    const patch = appleBitstream && lengthSize === 4 ? (au) => appleNalRefIdc(au, lengthSize) : undefined;
+    // Preferred: full Apple SPS/PPS + slice header transplant. Fallback: SEI + nal_ref_idc only.
+    let tp = null;
+    let bitstream = 'x264';
+    if (appleBitstream && appleHeaders && lengthSize === 4) {
+      tp = appleTransplant(vMovie, vt, avcCBox, `${videoPath}.apple.h264`, plan.fps || 30);
+      if (tp.path) {
+        const src = new Source(tp.path);
+        opened.push({ src });
+        tp.src = src;
+        bitstream = 'apple-headers';
+      } else {
+        bitstream = `apple-sei (${tp.reason})`;
+        tp = null;
+      }
+    } else if (appleBitstream) {
+      bitstream = 'apple-sei';
+    }
+    const patch = !tp && appleBitstream && lengthSize === 4 ? (au) => appleNalRefIdc(au, lengthSize) : undefined;
     const vSamples = vt.samples.map((s, i) => {
       const dts = Math.round(s.dts * scale);
       const pts = Math.round((s.dts + s.cto - shift) * scale);
       const prefix = patch && s.sync ? (i === 0 ? seiFirst : seiKey) : undefined;
       return {
-        src: vMovie.src,
-        offset: s.offset,
-        size: s.size + (prefix?.length || 0),
+        src: tp ? tp.src : vMovie.src,
+        offset: tp ? tp.samples[i].offset : s.offset,
+        size: tp ? tp.samples[i].size : s.size + (prefix?.length || 0),
         prefix,
         patch,
         dts,
@@ -250,7 +320,7 @@ export function muxOutput({ output, videoPath, audioPath, original, plan, encode
       timescale: VIDEO_TS,
       language: 0x55c4,
       samples: vSamples,
-      stsdEntries: [avc1Entry(codedW, codedH, patch ? appleAvcC(avcCBox) : avcCBox)],
+      stsdEntries: [avc1Entry(codedW, codedH, tp ? tp.avcC : patch ? appleAvcC(avcCBox) : avcCBox)],
       tkhd: { flags: 15, layer: 0, altGroup: 0, volume: 0, matrix, width: codedW, height: codedH },
       elst: [{ segDur: Math.round(videoSeconds * MOVIE_TS), mediaTime: 0, rate: 1 }],
       tref: [],
@@ -319,7 +389,7 @@ export function muxOutput({ output, videoPath, audioPath, original, plan, encode
     return {
       ...report,
       tracks: out.map((t) => ({ id: t.id, kind: t.kind, fourcc: t.stsdEntries[0].toString('latin1', 4, 8), samples: t.samples.length })),
-      video: { width: dispW, height: dispH, frames: vSamples.length, seconds: videoSeconds },
+      video: { width: dispW, height: dispH, frames: vSamples.length, seconds: videoSeconds, bitstream },
     };
   } finally {
     for (const m of opened) m.src.close();

@@ -55,9 +55,10 @@ export function parseCommand(text, prefix) {
   return { name: name.toLowerCase(), args: args.map((a) => a.toLowerCase()) };
 }
 
-export function optionsFrom(config, mode, args = []) {
+export function optionsFrom(config, mode, args = [], method = config.method || 'tt') {
   const haze = (config.outputStyle || 'haze') === 'haze';
-  const opts = { mode, fps: config.defaultFps, preset: config.preset, crf: config.crf, pad: haze, dupAudio: haze };
+  const opts = { method, mode, fps: config.defaultFps, preset: config.preset, crf: config.crf, pad: haze, dupAudio: haze };
+  if (method === 'tt') opts.pad = opts.dupAudio = true; // part of the reference file layout
   for (const a of args) {
     if (/^60(fps)?$/.test(a)) opts.fps = 60;
     else if (/^30(fps)?$/.test(a)) opts.fps = 30;
@@ -179,7 +180,7 @@ export function createRouter(deps) {
       if (duration > config.maxDurationSec + 1) throw new Error(T.tooLong(duration, config.maxDurationSec));
       const hazeOut = path.join(dir, 'haze.mov');
       const cleanOut = path.join(dir, 'clean.mov');
-      const opts = { ...optionsFrom(config, config.defaultMode), pad: true, dupAudio: true, cleanCopy: cleanOut };
+      const opts = { ...optionsFrom(config, config.defaultMode, [], 'haze'), pad: true, dupAudio: true, cleanCopy: cleanOut };
       await deps.runEngine(input, hazeOut, opts, progressReporter(setStatus));
       await setStatus('🧪 Menghantar fail ujian...');
       const base = baseFor(media.node);
@@ -281,9 +282,14 @@ export function createRouter(deps) {
           return reply(T.failed(err.message));
         }
       }
-      if (MODE_ALIASES[name]) {
+      if (['tt', 'tiktok'].includes(name)) {
         if (!media) return reply(T.needMedia(config.prefix, name));
-        return enqueue(ctx, media, optionsFrom(config, MODE_ALIASES[name], args));
+        return enqueue(ctx, media, optionsFrom(config, config.defaultMode, args, 'tt'));
+      }
+      if (MODE_ALIASES[name] || name === 'haze') {
+        // resolution modes belong to the re-encoding (haze) method
+        if (!media) return reply(T.needMedia(config.prefix, name));
+        return enqueue(ctx, media, optionsFrom(config, MODE_ALIASES[name] || config.defaultMode, args, 'haze'));
       }
       if (['uji', 'test', 'tes'].includes(name)) {
         if (!media) return reply(T.needMedia(config.prefix, name));

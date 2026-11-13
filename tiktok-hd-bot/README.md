@@ -6,6 +6,29 @@ fail asal iPhone (`IMG_1880.MOV`) dan fail selepas Haze (`IMG_1880_haze.mp4`).
 
 ---
 
+## 0. Kaedah lalai sekarang: format eksport editor TikTok (`METHOD=tt`)
+
+Fail rujukan yang TikTok terima tanpa mampatan (`3597584536345446561.mp4`) dibedah sepenuhnya:
+
+| | Fail rujukan | Hasil bot untuk `IMG_1929.mov` |
+|---|---|---|
+| Video | HEVC 10-bit HDR HLG + RPU Dolby Vision, dienkod Apple, **disalin** (timescale 600→19200) | video kamera asal **disalin bit-exact** (HDR + Dolby Vision kekal) |
+| Bekas | MP4 `isom` 512 `isomiso2mp41`, `moov` di depan, `free`, `mdat` (ffmpeg 6.1 `Lavf60.16.100`) | sama (ffmpeg 6.1) |
+| Handler | `VideoHandler` / `SoundHandler`, `dref url` | sama |
+| Tag | `artist`, `comment`, `copyright`=md5, **`te_is_reencode`=1**, `encoder` | sama (nilai `artist`/`comment` sendiri, `copyright` md5 rawak) |
+| Audio | AAC asal + **17 frame senyap** (8 terakhir entri PCE) | sama |
+| Trek ke-3 | AAC pendua berkongsi data, ditulis **selepas `udta`** | sama |
+| `dvvC` / jenama `dby1` | tiada | dibuang |
+
+`te_is_reencode` dan `copyright` ialah tag yang editor ByteDance (CapCut / TikTok) tulis pada fail
+eksportnya sendiri — fail yang dimuat turun terus dari TikTok pun ada tag yang sama, bersama JSON
+`{"TEEditor":"2","te_is_reencode":"1",...}`. Fail yang membawa tag ini nampak seperti sudah diproses
+oleh editor TikTok. Hash `copyright` bukan md5 mana-mana bahagian fail (sudah diuji), jadi nilai rawak digunakan.
+
+Video yang tak boleh disalin (bukan HEVC/H.264, lebih 60fps, atau > 80 Mbps) di-encode semula dengan
+x265 (HDR dikekalkan, maks 60fps, GOP 0.5 s, ~23 Mbps). Kaedah lama (SDR H.264 gaya Haze) masih ada:
+arahan `.max` / `.hd` / `.haze`, atau `METHOD=haze`.
+
 ## 1. Apa beza fail asal dengan fail Haze
 
 | | Asal (`IMG_1880.MOV`) | Selepas Haze Max |

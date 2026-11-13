@@ -9,13 +9,12 @@ export function menu(p, inGroup = false) {
     'Bot balas dengan dokumen yang sudah siap convert untuk TikTok HD.',
     '',
     '*Pilihan* (tulis pada kapsyen dokumen, atau reply video):',
-    `• ${p}max — 4K 2160p 30fps (lalai)`,
-    `• ${p}hd — 1080p 30fps (lebih laju)`,
-    `• ${p}keep — kekal resolusi asal`,
+    `• (tiada arahan) — video asal + format TikTok editor (lalai, paling laju)`,
+    `• ${p}max — encode semula 4K 30fps SDR (kaedah Haze)`,
+    `• ${p}hd — encode semula 1080p 30fps`,
     `• ${p}info — semak video sedia TikTok HD atau tidak`,
     `• ${p}status — lihat barisan giliran`,
     `• ${p}uji — hantar 5 versi fail untuk uji mana yang boleh dimuat turun`,
-    `Tambah *60* untuk 60fps, contoh: ${p}max 60`,
     '',
     `⚠️ Video biasa (bukan dokumen) sudah dimampat WhatsApp${inGroup ? ` — dalam group, reply video itu dengan *${p}max* kalau tetap mahu proses` : ''}.`,
   ].join('\n');
@@ -60,11 +59,16 @@ function describeVideo(v) {
 export function done(res) {
   const r = res.result;
   const i = res.input;
+  const tt = res.plan.method === 'tt';
+  const out = tt
+    ? `${String(r.codec || '').toUpperCase()} ${r.width}x${r.height} ${res.plan.fps}fps${res.plan.hdr ? ` HDR-${res.plan.hdr.toUpperCase()}` : ''} — ${res.plan.video === 'copy' ? 'video asal, tanpa encode semula' : 'encode semula (x265)'}`
+    : `H.264 ${r.width}x${r.height} ${res.plan.fps}fps SDR`;
   const lines = [
     `✅ *Siap!* (${Math.round(res.seconds)}s)`,
     `📥 Asal: ${describeVideo(i.video)}, ${mb(i.size)}${i.device ? ` • ${i.device}` : ''}`,
-    `📤 Hasil: H.264 ${r.width}x${r.height} ${res.plan.fps}fps SDR, ${(r.bitrate / 1e6).toFixed(1)} Mbps, ${mb(r.size)}`,
+    `📤 Hasil: ${out}, ${(r.bitrate / 1e6).toFixed(1)} Mbps, ${mb(r.size)}`,
   ];
+  if (tt) lines.push('🏷️ Tag editor TikTok (te_is_reencode) + audio gaya fail rujukan');
   if (i.appleTracks) lines.push(`🧩 Metadata kamera iPhone dikekalkan (${i.appleTracks} trek${i.spatialAudio ? ' + Spatial Audio' : ''})`);
   if (i.hadGps) lines.push('🔒 Lokasi GPS & info peranti dibuang');
   lines.push(

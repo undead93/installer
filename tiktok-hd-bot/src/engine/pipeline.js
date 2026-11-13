@@ -5,9 +5,15 @@ import path from 'node:path';
 import { analyze } from './analyze.js';
 import { detectCaps, runFfmpeg, ffprobe } from './ffmpeg.js';
 import { inspectMp4a } from './aac.js';
+import crypto from 'node:crypto';
 import { muxOutput } from './mux.js';
+import { ttPostProcess } from './ttremux.js';
 
 export const DEFAULTS = {
+  method: 'tt', // tt = keep the original video, package it like a TikTok/CapCut export (reference link file)
+  //               haze = re-encode to SDR H.264 in an iPhone-style container (the earlier method)
+  metaArtist: 'HD Method',
+  metaComment: 'normal',
   mode: 'max', // max = 2160p (4K) | hd = 1080p | keep = source resolution (max 2160p)
   fps: 30, // upper limit; never duplicates frames (60 allowed)
   preset: 'medium', // x264 preset: veryfast/faster/fast/medium/slow
@@ -17,7 +23,8 @@ export const DEFAULTS = {
   dupAudio: true, // duplicate AAC track sharing the same data (reference-file quirk)
   keepAppleTracks: true, // pass through iPhone APAC + mebx camera metadata tracks
   appleBitstream: true, // Apple encoder SEI + nal_ref_idc like VideoToolbox output
-  encoderTag: 'TikTok HD Bot',
+  appleHeaders: true, // also transplant Apple's SPS/PPS and rewrite slice headers to match
+  encoderTag: 'HD Method',
   workDir: path.join(os.tmpdir(), 'tiktok-hd'),
 };
 
@@ -107,15 +114,120 @@ export function makePlan(info, opts, caps) {
     // capped at maxrate. Calibrated: 11.0 Mbps on IMG_1880 (reference 11.08), ~4–5 Mbps on IMG_1913 (4.16).
     x264Params:
       `keyint=${fps}:min-keyint=${fps}:scenecut=0:bframes=3:b-adapt=0:b-pyramid=normal:ref=4:weightp=0:open-gop=0:cabac=1:8x8dct=1` +
-      ':ipratio=2.0:pbratio=1.6:mbtree=0:psy-rd=0.0,0.0:aq-strength=0.5:qpmin=21',
+      ':ipratio=2.0:pbratio=1.6:mbtree=0:psy-rd=0.0,0.0:aq-strength=0.5:qpmin=21' +
+      ':weightb=0', // Apple's PPS has no weighted bi-prediction — needed for the SPS/PPS transplant
     audio,
   };
+}
+
+async function frameHashes(file, frames) {
+  const lines = [];
+  await runFfmpeg(['-i', file, '-map', '0:v:0', '-frames:v', String(frames), '-f', 'framemd5', '-'], {
+    onLine: (l) => !l.startsWith('#') && lines.push(l.split(',').pop().trim()),
+  }).catch(() => lines.push('error'));
+  return lines;
+}
+
+async function sameFrames(a, b, frames) {
+  const [x, y] = await Promise.all([frameHashes(a, frames), frameHashes(b, frames)]);
+  return x.length > 0 && x.length === y.length && x.every((h, i) => h === y[i]);
+}
+
+/**
+ * "tt" method — reproduces the reference file that TikTok accepts without re-compression:
+ * the original video stream copied untouched (Apple HEVC HDR + Dolby Vision RPUs stay), remuxed by
+ * ffmpeg into a faststart MP4 carrying the TikTok/CapCut editor tags (te_is_reencode=1, copyright
+ * hash), then the duplicate AAC track + 17 silent frames added like the reference.
+ */
+async function processTT(input, output, opts, onProgress, started) {
+  const caps = await detectCaps();
+  const info = await analyze(input);
+  try {
+    const v = info.video;
+    if (!v) throw new Error('Fail ini tiada trek video.');
+    const streams = info.probe.streams || [];
+    const vIndex = streams.find((s) => s.codec_type === 'video' && !s.disposition?.attached_pic).index;
+    const aac = streams.find((s) => s.codec_type === 'audio' && s.codec_name === 'aac');
+    const anyAudio = streams.find((s) => s.codec_type === 'audio' && s.codec_name && s.codec_name !== 'unknown');
+    const copyVideo = ['hevc', 'h264'].includes(v.codec) && v.fps <= 61 && (!v.bitrate || v.bitrate <= 80e6);
+    const fps = copyVideo ? v.fps : pickFps(v.fps, 60);
+    fs.mkdirSync(opts.workDir, { recursive: true });
+    const work = fs.mkdtempSync(path.join(opts.workDir, 'job-'));
+    try {
+      const step1 = path.join(work, 'remux.mp4');
+      const args = ['-i', input];
+      if (!anyAudio) args.push('-f', 'lavfi', '-t', String(Math.max(0.2, info.duration)), '-i', 'anullsrc=r=48000:cl=stereo');
+      args.push('-map', `0:${vIndex}`, '-map', aac ? `0:${aac.index}` : anyAudio ? `0:${anyAudio.index}` : '1:a:0');
+      if (copyVideo) {
+        args.push('-c:v', 'copy');
+      } else {
+        if (!caps.x265) throw new Error('Video ini perlu encode semula tetapi ffmpeg tiada libx265.');
+        const hdr = Boolean(v.hdr);
+        const gop = Math.max(1, Math.round(fps / 2)); // half-second GOP like the reference
+        const color = hdr
+          ? `colorprim=bt2020:transfer=${v.transfer === 'smpte2084' ? 'smpte2084' : 'arib-std-b67'}:colormatrix=bt2020nc`
+          : 'colorprim=bt709:transfer=bt709:colormatrix=bt709';
+        args.push(
+          '-vf', `fps=${fps}`,
+          '-c:v', 'libx265', '-preset', opts.x265Preset || 'fast', '-crf', '18', '-tag:v', 'hvc1',
+          '-pix_fmt', hdr ? 'yuv420p10le' : 'yuv420p', ...(hdr ? ['-profile:v', 'main10'] : []),
+          '-x265-params', `log-level=error:info=0:keyint=${gop}:min-keyint=${gop}:bframes=3:vbv-maxrate=25000:vbv-bufsize=50000:${color}`,
+        );
+      }
+      args.push(aac ? '-c:a' : '-c:a', aac ? 'copy' : 'aac', ...(aac ? [] : ['-b:a', '256k', '-ar', '48000', '-ac', '2']));
+      args.push(
+        '-map_metadata', '-1', '-map_metadata:s:v', '-1', '-map_metadata:s:a', '-1', '-map_chapters', '-1',
+        '-metadata', `artist=${opts.metaArtist}`,
+        '-metadata', `comment=${opts.metaComment}`,
+        '-metadata', `copyright=${crypto.randomBytes(16).toString('hex')}`,
+        '-metadata', 'te_is_reencode=1',
+        '-movflags', '+faststart+use_metadata_tags',
+        '-f', 'mp4', step1,
+      );
+      await runFfmpeg(args, { duration: info.duration, onProgress: (p) => onProgress({ stage: copyVideo ? 'mux' : 'video', ...p }) });
+      onProgress({ stage: 'mux', percent: 100 });
+      ttPostProcess(step1, output, { pad: opts.pad, dup: opts.dupAudio });
+      const check = await ffprobe(output);
+      const vOut = (check.streams || []).find((s) => s.codec_type === 'video');
+      if (!vOut) throw new Error('Semakan output gagal (tiada video).');
+      const audioOut = (check.streams || []).filter((s) => s.codec_type === 'audio');
+      return {
+        output,
+        seconds: (Date.now() - started) / 1000,
+        input: {
+          file: info.file,
+          size: info.size,
+          duration: info.duration,
+          video: info.video,
+          device: info.apple.model,
+          appleTracks: 0,
+          spatialAudio: false,
+          hadGps: info.apple.hasGps,
+        },
+        plan: { method: 'tt', video: copyVideo ? 'copy' : 'x265', fps: Math.round(fps), hdr: v.hdr, audio: aac ? 'copy' : 'aac' },
+        result: {
+          size: fs.statSync(output).size,
+          width: vOut.width,
+          height: vOut.height,
+          codec: vOut.codec_name,
+          duration: Number(check.format?.duration) || 0,
+          bitrate: Number(vOut.bit_rate) || 0,
+          tracks: [vOut, ...audioOut].map((s) => ({ id: s.index + 1, fourcc: s.codec_tag_string })),
+        },
+      };
+    } finally {
+      fs.rmSync(work, { recursive: true, force: true });
+    }
+  } finally {
+    info.movie?.src.close();
+  }
 }
 
 export async function processVideo(input, output, options = {}, onProgress = () => {}) {
   const opts = { ...DEFAULTS };
   for (const [k, val] of Object.entries(options)) if (val !== undefined && val !== null && val !== '') opts[k] = val;
   const started = Date.now();
+  if (opts.method === 'tt') return processTT(input, output, opts, onProgress, started);
   const caps = await detectCaps();
   if (!caps.x264) throw new Error('ffmpeg anda tiada encoder libx264.');
   const info = await analyze(input);
@@ -167,8 +279,15 @@ export async function processVideo(input, output, options = {}, onProgress = () 
           dupAudio: v.dupAudio ?? opts.dupAudio,
           keepAppleTracks: v.keepAppleTracks ?? opts.keepAppleTracks,
           appleBitstream: opts.appleBitstream,
+          appleHeaders: v.appleHeaders ?? opts.appleHeaders,
         });
-      const report = mux(output);
+      let report = mux(output);
+      // Safety net for the header transplant: decoded pictures must be bit-identical to x264's own stream.
+      if (report.video.bitstream === 'apple-headers' && !(await sameFrames(videoPath, output, 90))) {
+        opts.appleHeaders = false;
+        report = mux(output);
+        report.video.bitstream += ' (transplant check failed)';
+      }
       // Extra containers from the same encode (e.g. a "clean" copy for comparison) — remuxing is cheap.
       const variants = (opts.variants || []).map((v) => {
         mux(v.output, v);
@@ -192,7 +311,7 @@ export async function processVideo(input, output, options = {}, onProgress = () 
           spatialAudio: info.apple.spatialAudio,
           hadGps: info.apple.hasGps,
         },
-        plan: { mode: plan.mode, dst: plan.dst, fps: plan.fps, hdr: plan.hdr, audio: plan.audio.mode, maxrate: plan.maxrate, preset: plan.preset, crf: plan.crf },
+        plan: { mode: plan.mode, dst: plan.dst, fps: plan.fps, hdr: plan.hdr, audio: plan.audio.mode, maxrate: plan.maxrate, preset: plan.preset, crf: plan.crf, bitstream: report.video.bitstream },
         result: {
           size: fs.statSync(output).size,
           width: report.video.width,

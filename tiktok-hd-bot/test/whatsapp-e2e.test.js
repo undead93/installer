@@ -62,7 +62,7 @@ test('group: document video in -> converted document out', async () => {
             url: `${base}/in.enc`,
             mimetype: 'video/quicktime',
             fileName: 'IMG_TEST.MOV',
-            caption: OWN_INPUT ? process.env.E2E_CAPTION || '' : '.hd',
+            caption: OWN_INPUT ? process.env.E2E_CAPTION || '' : '',
             mediaKey: enc.mediaKey,
             fileSha256: enc.fileSha256,
             fileEncSha256: enc.fileEncSha256,
@@ -123,14 +123,15 @@ test('group: document video in -> converted document out', async () => {
   fs.writeFileSync(outPath, file);
   const p = JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-show_streams', '-show_format', '-of', 'json', outPath]).toString());
   const v = p.streams.find((s) => s.codec_type === 'video');
-  assert.equal(p.format.tags.major_brand, 'qt  ');
-  assert.equal(v.codec_name, 'h264');
-  assert.equal(v.color_transfer, 'bt709');
-  assert.equal(v.r_frame_rate, '30/1');
+  // default "tt" method: original HEVC HDR copied, packaged like a TikTok editor export
+  assert.equal(p.format.tags.major_brand, OWN_INPUT ? p.format.tags.major_brand : 'isom');
+  assert.equal(p.format.tags.te_is_reencode, '1');
+  assert.equal(v.codec_name, 'hevc');
   if (OWN_INPUT) {
     if (process.env.E2E_KEEP) fs.copyFileSync(outPath, process.env.E2E_KEEP);
   } else {
     assert.equal(`${v.width}x${v.height}`, '1920x1080');
+    assert.equal(v.color_transfer, 'arib-std-b67');
   }
 
   // 5. Temporary files are cleaned up.

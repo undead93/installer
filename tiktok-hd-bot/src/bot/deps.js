@@ -16,6 +16,9 @@ const CLI = path.join(ROOT, 'src', 'cli.js');
 export function runEngine(config, input, output, opts, onProgress) {
   return new Promise((resolve, reject) => {
     const args = [CLI, input, '-o', output, '--json', '--mode', opts.mode, '--fps', String(opts.fps), '--preset', opts.preset, '--crf', String(opts.crf), '--tag', config.encoderTag];
+    if (opts.method) args.push('--method', opts.method);
+    if (config.metaArtist) args.push('--artist', config.metaArtist);
+    if (config.metaComment) args.push('--comment', config.metaComment);
     if (opts.pad === false) args.push('--no-pad');
     if (opts.dupAudio === false) args.push('--no-dup-audio');
     if (opts.cleanCopy) args.push('--clean-copy', opts.cleanCopy);

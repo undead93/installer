@@ -50,13 +50,18 @@ export const config = {
   // haze  = full layout of the reference files (duplicate AAC track + 17 silent frames) — default
   // clean = iPhone-style container without those two quirks
   outputStyle: String(env.OUTPUT_STYLE).toLowerCase() === 'clean' ? 'clean' : 'haze',
+  // tt = keep the original video and package it like a TikTok/CapCut export (default)
+  // haze = re-encode to SDR H.264 4K in an iPhone-style container (earlier method)
+  method: String(env.METHOD).toLowerCase() === 'haze' ? 'haze' : 'tt',
+  metaArtist: env.META_ARTIST || 'HD Method',
+  metaComment: env.META_COMMENT || 'normal',
   defaultMode: ['max', 'hd', 'keep'].includes(env.DEFAULT_MODE) ? env.DEFAULT_MODE : 'max',
   defaultFps: num(env.DEFAULT_FPS, 30),
   preset: env.X264_PRESET || 'medium',
   crf: num(env.CRF, 16),
   maxFileMb: num(env.MAX_FILE_MB, 1024),
   maxDurationSec: num(env.MAX_DURATION_SEC, 300),
-  encoderTag: env.ENCODER_TAG || 'TikTok HD Bot',
+  encoderTag: env.ENCODER_TAG || 'HD Method',
   concurrency: Math.max(1, num(env.CONCURRENCY, 1)),
   sessionDir: path.resolve(ROOT, env.SESSION_DIR || 'session'),
   workDir: path.resolve(ROOT, env.WORK_DIR || 'tmp'),

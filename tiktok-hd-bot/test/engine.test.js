@@ -9,6 +9,7 @@ import { execFileSync } from 'node:child_process';
 import { processVideo } from '../src/engine/pipeline.js';
 import { parseMovie } from '../src/engine/mp4.js';
 import { analyze } from '../src/engine/analyze.js';
+import { parseSps, appleSps } from '../src/engine/avc.js';
 
 let dir;
 const ff = (...args) => execFileSync('ffmpeg', ['-hide_banner', '-v', 'error', '-y', ...args]);
@@ -18,7 +19,7 @@ const md5 = (m, samples) => {
   for (const s of samples) h.update(m.src.read(s.offset, s.size));
   return h.digest('hex');
 };
-const FAST = { preset: 'ultrafast', encoderTag: 'Test Tag' };
+const FAST = { method: 'haze', preset: 'ultrafast', encoderTag: 'Test Tag' };
 
 before(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hdtest-'));
@@ -166,6 +167,84 @@ test('mono AAC is padded too: 17 four-byte silent frames, PCE mono config on the
     m.src.close();
   }
   execFileSync('ffmpeg', ['-v', 'error', '-xerror', '-i', output, '-map', '0', '-f', 'null', '-']);
+});
+
+test('Apple SPS built from x264 4K SPS is byte-identical to the reference files', () => {
+  const x264Sps = Buffer.from('67640033acd9403c0043ec05a808080a000003000200000300781e30632c', 'hex');
+  assert.equal(appleSps(parseSps(x264Sps), 30).toString('hex'), '27640033ac56500f0010fa6a02020280071a6d00cdfe6002');
+});
+
+test('Apple SPS/PPS transplant is lossless: every decoded frame identical to x264 headers', async () => {
+  const input = path.join(dir, 'hlg.mov');
+  const a = path.join(dir, 'tp_apple.mp4');
+  const b = path.join(dir, 'tp_x264.mp4');
+  const res = await processVideo(input, a, { ...FAST, preset: 'veryfast', mode: 'hd', variants: [{ output: b, appleHeaders: false }] });
+  assert.equal(res.plan.bitstream, 'apple-headers');
+  const hashes = (f) => execFileSync('ffmpeg', ['-v', 'error', '-xerror', '-i', f, '-map', '0:v:0', '-f', 'framemd5', '-']).toString().split('\n').filter((l) => l && !l.startsWith('#')).map((l) => l.split(',').pop().trim());
+  const ha = hashes(a);
+  assert.equal(ha.length, 60);
+  assert.deepEqual(ha, hashes(b));
+  const m = parseMovie(a);
+  try {
+    const e = m.tracks.find((t) => t.handler === 'vide').stsdEntries[0];
+    const avcC = e.subarray(e.indexOf('avcC') + 4);
+    assert.equal(avcC[8], 0x27, 'Apple-style SPS');
+    const spsLen = avcC.readUInt16BE(6);
+    assert.equal(avcC.subarray(8 + spsLen + 3, 8 + spsLen + 7).toString('hex'), '28ee3cb0', 'Apple PPS');
+  } finally {
+    m.src.close();
+  }
+});
+
+test('tt method: original video copied bit-exact, packaged like the reference (tags, padding, duplicate after udta)', async () => {
+  const input = path.join(dir, 'hlg.mov');
+  const output = path.join(dir, 'tt.mp4');
+  const res = await processVideo(input, output, { method: 'tt', metaArtist: 'A', metaComment: 'C' });
+  assert.equal(res.plan.method, 'tt');
+  assert.equal(res.plan.video, 'copy');
+  const p = probe(output);
+  const tags = p.format.tags;
+  assert.equal(tags.major_brand, 'isom');
+  assert.equal(tags.compatible_brands, 'isomiso2mp41');
+  assert.equal(tags.te_is_reencode, '1');
+  assert.match(tags.copyright, /^[0-9a-f]{32}$/);
+  assert.equal(tags.artist, 'A');
+  assert.equal(tags.comment, 'C');
+  assert.match(tags.encoder, /^Lavf/);
+  const v = p.streams.find((s) => s.codec_type === 'video');
+  assert.equal(v.codec_name, 'hevc');
+  assert.equal(v.color_transfer, 'arib-std-b67', 'HDR kept');
+  assert.equal(v.tags.handler_name, 'VideoHandler');
+  const src = parseMovie(input);
+  const out = parseMovie(output);
+  try {
+    assert.deepEqual(out.topLevel, ['ftyp', 'moov', 'free', 'mdat']);
+    assert.deepEqual(out.tracks.map((t) => t.fourcc), ['hvc1', 'mp4a', 'mp4a']);
+    const sv = src.tracks.find((t) => t.handler === 'vide');
+    assert.equal(md5(out, out.tracks[0].samples), md5(src, sv.samples), 'video samples copied bit-exact');
+    const a1 = out.tracks[1];
+    assert.equal(a1.stsdEntries.length, 2);
+    assert.ok(a1.stsdEntries[1].toString('hex').includes('118004c040002000'));
+    assert.deepEqual(a1.samples.slice(-17).map((x) => x.size), Array(17).fill(6));
+    assert.deepEqual(out.tracks[2].samples.map((x) => x.offset), a1.samples.map((x) => x.offset));
+  } finally {
+    src.src.close();
+    out.src.close();
+  }
+  const raw = fs.readFileSync(output);
+  assert.ok(raw.indexOf('udta') < raw.lastIndexOf('trak'), 'duplicate track written after udta');
+  assert.equal(raw.includes('dvvC'), false);
+  execFileSync('ffmpeg', ['-v', 'error', '-xerror', '-i', output, '-map', '0', '-f', 'null', '-']);
+});
+
+test('tt method re-encodes what cannot be copied (VP9) with x265 and still adds the tags', async () => {
+  const output = path.join(dir, 'tt_vp9.mp4');
+  const res = await processVideo(path.join(dir, 'clip.webm'), output, { method: 'tt', x265Preset: 'ultrafast' });
+  assert.equal(res.plan.video, 'x265');
+  const p = probe(output);
+  assert.equal(p.streams.find((s) => s.codec_type === 'video').codec_name, 'hevc');
+  assert.equal(p.format.tags.te_is_reencode, '1');
+  assert.equal(p.streams.filter((s) => s.codec_type === 'audio').length, 2);
 });
 
 test('SDR full-range source with MP3: upscaled to 4K, audio transcoded to AAC', async () => {

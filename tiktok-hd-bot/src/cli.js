@@ -13,7 +13,9 @@ const HELP = `Guna:
   node src/cli.js compare <a> <b>                      banding struktur dua fail trek demi trek
 
 Pilihan:
-  --mode max|hd|keep    max = 4K 2160p (lalai), hd = 1080p, keep = resolusi asal
+  --method tt|haze      tt = video asal disalin + tag editor TikTok (lalai, macam fail rujukan)
+                        haze = encode semula SDR H.264 gaya iPhone (kaedah lama)
+  --mode max|hd|keep    (haze) max = 4K 2160p, hd = 1080p, keep = resolusi asal
   --fps 30|60           had fps (lalai 30, tidak pernah gandakan frame)
   --preset <nama>       preset x264: veryfast, faster, fast, medium (lalai), slow
   --crf <n>             kualiti x264 (lalai 16), dihadkan oleh --maxrate & lantai QP 21
@@ -109,6 +111,9 @@ async function main() {
   if (!fs.existsSync(input)) throw new Error(`Fail tidak wujud: ${input}`);
   const output = args.output || path.join(path.dirname(input), `${path.parse(input).name}_hd.mp4`);
   const options = {
+    method: args.method,
+    metaArtist: args.artist,
+    metaComment: args.comment,
     mode: args.mode,
     fps: args.fps ? Number(args.fps) : undefined,
     preset: args.preset,
@@ -140,7 +145,7 @@ async function main() {
     const r = res.result;
     process.stderr.write('\n');
     console.log(`✅ Siap dalam ${res.seconds.toFixed(1)}s -> ${res.output}`);
-    console.log(`   ${r.width}x${r.height} ${res.plan.fps}fps H.264, ${(r.bitrate / 1e6).toFixed(1)} Mbps, ${(r.size / 1048576).toFixed(1)} MB, ${r.duration.toFixed(2)}s`);
+    console.log(`   ${r.width}x${r.height} ${res.plan.fps}fps ${res.plan.method === 'tt' ? `${r.codec} (${res.plan.video})` : 'H.264'}, ${(r.bitrate / 1e6).toFixed(1)} Mbps, ${(r.size / 1048576).toFixed(1)} MB, ${r.duration.toFixed(2)}s`);
     console.log(`   trek: ${r.tracks.map((t) => `${t.id}:${t.fourcc}`).join(' ')}`);
   }
 }
