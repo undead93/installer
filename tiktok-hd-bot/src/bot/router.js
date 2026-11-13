@@ -56,14 +56,23 @@ export function parseCommand(text, prefix) {
 }
 
 export function optionsFrom(config, mode, args = []) {
-  const opts = { mode, fps: config.defaultFps, preset: config.preset, crf: config.crf };
+  const haze = config.outputStyle === 'haze';
+  const opts = { mode, fps: config.defaultFps, preset: config.preset, crf: config.crf, pad: haze, dupAudio: haze };
   for (const a of args) {
     if (/^60(fps)?$/.test(a)) opts.fps = 60;
     else if (/^30(fps)?$/.test(a)) opts.fps = 30;
     else if (/^(laju|fast)$/.test(a)) opts.preset = 'faster';
+    else if (a === 'haze') opts.pad = opts.dupAudio = true;
+    else if (/^(bersih|clean)$/.test(a)) opts.pad = opts.dupAudio = false;
     else if (MODE_ALIASES[a]) opts.mode = MODE_ALIASES[a];
   }
   return opts;
+}
+
+/** Name + MIME type of the reply document. QuickTime content goes out as .mov / video/quicktime by default. */
+export function replyFile(config, node) {
+  const ext = config.docFormat === 'mp4' ? '.mp4' : '.mov';
+  return { fileName: `${baseFor(node)}_hd${ext}`, mimetype: ext === '.mov' ? 'video/quicktime' : 'video/mp4' };
 }
 
 /**
@@ -99,15 +108,7 @@ export function createRouter(deps) {
   async function processJob({ chat, msg, media, opts, isGroup, user }) {
     fs.mkdirSync(config.workDir, { recursive: true });
     const dir = fs.mkdtempSync(path.join(config.workDir, 'wa-'));
-    let statusKey = null;
-    const setStatus = async (text) => {
-      try {
-        if (!statusKey) statusKey = (await send(chat, { text }, { quoted: msg }))?.key;
-        else await send(chat, { text, edit: statusKey });
-      } catch {
-        // progress edits are best effort
-      }
-    };
+    const setStatus = statusUpdater(chat, msg);
     try {
       if (media.kind === 'video') await send(chat, { text: T.compressedWarning() }, { quoted: msg });
       await setStatus(T.downloading());
@@ -115,26 +116,82 @@ export function createRouter(deps) {
       await deps.download(media.waMessage, input);
       const duration = await deps.probeDuration(input);
       if (duration > config.maxDurationSec + 1) throw new Error(T.tooLong(duration, config.maxDurationSec));
-      const output = path.join(dir, `${baseFor(media.node)}_hd.mp4`);
-      let last = 0;
-      const res = await deps.runEngine(input, output, opts, (p) => {
-        try {
-          const now = Date.now();
-          if (now - last > 12000 || p.stage === 'mux') {
-            last = now;
-            setStatus(T.progress(p.stage, p.percent, p.fps));
-          }
-        } catch (err) {
-          log(`progress update skipped: ${err.message}`); // a status message must never break the job
-        }
-      });
+      const { fileName, mimetype } = replyFile(config, media.node);
+      const output = path.join(dir, fileName);
+      const res = await deps.runEngine(input, output, opts, progressReporter(setStatus));
       await setStatus('✅ Selesai — menghantar fail...');
       // In a group, tag the sender so they get notified even in a busy chat.
       const tag = isGroup && user ? `@${user.split('@')[0].split(':')[0]} ` : '';
-      const doc = { document: { url: output }, mimetype: 'video/mp4', fileName: path.basename(output), caption: tag + T.done(res) };
+      const doc = { document: { url: output }, mimetype, fileName, caption: tag + T.done(res) };
       if (tag) doc.mentions = [user];
       await send(chat, doc, { quoted: msg });
-      log(`done ${path.basename(output)} in ${Math.round(res.seconds)}s`);
+      log(`done ${fileName} in ${Math.round(res.seconds)}s`);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  function progressReporter(setStatus) {
+    let last = 0;
+    return (p) => {
+      try {
+        const now = Date.now();
+        if (now - last > 12000 || p.stage === 'mux') {
+          last = now;
+          setStatus(T.progress(p.stage, p.percent, p.fps));
+        }
+      } catch (err) {
+        log(`progress update skipped: ${err.message}`); // a status message must never break the job
+      }
+    };
+  }
+
+  function statusUpdater(chat, msg) {
+    let statusKey = null;
+    return async (text) => {
+      try {
+        if (!statusKey) statusKey = (await send(chat, { text }, { quoted: msg }))?.key;
+        else await send(chat, { text, edit: statusKey });
+      } catch {
+        // progress edits are best effort
+      }
+    };
+  }
+
+  /**
+   * ".uji": one encode, several ways of delivering it, so the user can see on their phone which
+   * documents WhatsApp lets them download (iPhone WhatsApp rejects some files as "Couldn't download").
+   */
+  async function testJob({ chat, msg, media }) {
+    fs.mkdirSync(config.workDir, { recursive: true });
+    const dir = fs.mkdtempSync(path.join(config.workDir, 'wa-'));
+    const setStatus = statusUpdater(chat, msg);
+    try {
+      await setStatus(T.downloading());
+      const input = path.join(dir, `input${extFor(media.node)}`);
+      await deps.download(media.waMessage, input);
+      const duration = await deps.probeDuration(input);
+      if (duration > config.maxDurationSec + 1) throw new Error(T.tooLong(duration, config.maxDurationSec));
+      const hazeOut = path.join(dir, 'haze.mov');
+      const cleanOut = path.join(dir, 'clean.mov');
+      const opts = { ...optionsFrom(config, config.defaultMode), pad: true, dupAudio: true, cleanCopy: cleanOut };
+      await deps.runEngine(input, hazeOut, opts, progressReporter(setStatus));
+      await setStatus('🧪 Menghantar fail ujian...');
+      const base = baseFor(media.node);
+      const files = [
+        { label: 'A', file: hazeOut, fileName: `A_${base}_haze.mp4`, mimetype: 'video/mp4', desc: 'gaya Haze penuh, .mp4 (format lama bot)' },
+        { label: 'B', file: hazeOut, fileName: `B_${base}_haze.mov`, mimetype: 'video/quicktime', desc: 'gaya Haze penuh, .mov' },
+        { label: 'C', file: cleanOut, fileName: `C_${base}_bersih.mov`, mimetype: 'video/quicktime', desc: 'gaya iPhone bersih, .mov (lalai baharu)' },
+        { label: 'D', file: hazeOut, fileName: `D_${base}_haze.mp4`, mimetype: 'application/octet-stream', desc: 'gaya Haze penuh, dihantar sebagai fail biasa' },
+      ];
+      const original = toNum(media.node.fileLength) || fs.statSync(input).size;
+      if (original <= 64 * 1048576) {
+        files.push({ label: 'E', file: input, fileName: `E_asal_${media.node.fileName || `video${extFor(media.node)}`}`, mimetype: media.node.mimetype || 'video/quicktime', desc: 'fail asal anda tanpa diubah (kawalan)' });
+      }
+      for (const f of files) {
+        await send(chat, { document: { url: f.file }, mimetype: f.mimetype, fileName: f.fileName, caption: `🧪 ${f.label}: ${f.desc}` });
+      }
+      await send(chat, { text: T.testDone(files.map((f) => f.label)) }, { quoted: msg });
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -154,7 +211,7 @@ export function createRouter(deps) {
     }
   }
 
-  async function enqueue(ctx, media, opts) {
+  async function enqueue(ctx, media, opts, kind = 'process') {
     const { chat, msg, user } = ctx;
     const reply = (text) => send(chat, { text }, { quoted: msg });
     if (!isVideoNode(media)) return reply(T.notVideo());
@@ -163,7 +220,7 @@ export function createRouter(deps) {
     if (size > config.maxFileMb * 1048576) return reply(T.tooBig(size, config.maxFileMb));
     const seconds = toNum(media.node.seconds);
     if (seconds > config.maxDurationSec) return reply(T.tooLong(seconds, config.maxDurationSec));
-    const job = queue.push(user, () => processJob({ ...ctx, media, opts }));
+    const job = queue.push(user, () => (kind === 'test' ? testJob({ ...ctx, media }) : processJob({ ...ctx, media, opts })));
     const pos = queue.position(user);
     if (pos > 0) await reply(T.queued(pos));
     try {
@@ -222,6 +279,10 @@ export function createRouter(deps) {
       if (MODE_ALIASES[name]) {
         if (!media) return reply(T.needMedia(config.prefix, name));
         return enqueue(ctx, media, optionsFrom(config, MODE_ALIASES[name], args));
+      }
+      if (['uji', 'test', 'tes'].includes(name)) {
+        if (!media) return reply(T.needMedia(config.prefix, name));
+        return enqueue(ctx, media, null, 'test');
       }
       return; // unknown command: stay quiet
     }

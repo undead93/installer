@@ -16,6 +16,9 @@ const CLI = path.join(ROOT, 'src', 'cli.js');
 export function runEngine(config, input, output, opts, onProgress) {
   return new Promise((resolve, reject) => {
     const args = [CLI, input, '-o', output, '--json', '--mode', opts.mode, '--fps', String(opts.fps), '--preset', opts.preset, '--crf', String(opts.crf), '--tag', config.encoderTag];
+    if (opts.pad === false) args.push('--no-pad');
+    if (opts.dupAudio === false) args.push('--no-dup-audio');
+    if (opts.cleanCopy) args.push('--clean-copy', opts.cleanCopy);
     const child = spawn(process.execPath, args, { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, TMPDIR: config.workDir } });
     let buf = '';
     let stderr = '';

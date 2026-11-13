@@ -42,6 +42,11 @@ export const config = {
     .filter(Boolean),
   allowSelf: bool(env.ALLOW_SELF, true), // the bot's own number may use commands (useful on a personal number)
   autoProcess: bool(env.AUTO_PROCESS, true), // a video sent as a document is converted without any command
+  // Reply file: mov = .mov + video/quicktime (matches the QuickTime content) | mp4 = .mp4 + video/mp4
+  docFormat: String(env.DOC_FORMAT).toLowerCase() === 'mp4' ? 'mp4' : 'mov',
+  // clean = iPhone-style container without the reference file's duplicate AAC track and silent tail
+  // haze  = byte-for-byte layout of the reference file (iPhone WhatsApp may refuse to download it)
+  outputStyle: String(env.OUTPUT_STYLE).toLowerCase() === 'haze' ? 'haze' : 'clean',
   defaultMode: ['max', 'hd', 'keep'].includes(env.DEFAULT_MODE) ? env.DEFAULT_MODE : 'max',
   defaultFps: num(env.DEFAULT_FPS, 30),
   preset: env.X264_PRESET || 'medium',

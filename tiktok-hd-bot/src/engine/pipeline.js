@@ -13,8 +13,8 @@ export const DEFAULTS = {
   preset: 'medium', // x264 preset: veryfast/faster/fast/medium/slow
   crf: 17, // quality target, capped by maxrate
   maxrate: 0, // 0 = auto by resolution (4K ≈ 11 Mbps, same ceiling as the reference file)
-  pad: true, // append 17 silent AAC frames in a tail mdat
-  dupAudio: true, // duplicate AAC track sharing the same data
+  pad: true, // append 17 silent AAC frames in a tail mdat (reference-file quirk)
+  dupAudio: true, // duplicate AAC track sharing the same data (reference-file quirk)
   keepAppleTracks: true, // pass through iPhone APAC + mebx camera metadata tracks
   encoderTag: 'TikTok HD Bot',
   workDir: path.join(os.tmpdir(), 'tiktok-hd'),
@@ -149,16 +149,23 @@ export async function processVideo(input, output, options = {}, onProgress = () 
       }
 
       onProgress({ stage: 'mux', percent: 100 });
-      const report = muxOutput({
-        output,
-        videoPath,
-        audioPath,
-        original: info.movie,
-        plan,
-        encoderTag: opts.encoderTag,
-        pad: opts.pad,
-        dupAudio: opts.dupAudio,
-        keepAppleTracks: opts.keepAppleTracks,
+      const mux = (out, v = {}) =>
+        muxOutput({
+          output: out,
+          videoPath,
+          audioPath,
+          original: info.movie,
+          plan,
+          encoderTag: opts.encoderTag,
+          pad: v.pad ?? opts.pad,
+          dupAudio: v.dupAudio ?? opts.dupAudio,
+          keepAppleTracks: v.keepAppleTracks ?? opts.keepAppleTracks,
+        });
+      const report = mux(output);
+      // Extra containers from the same encode (e.g. a "clean" copy for comparison) — remuxing is cheap.
+      const variants = (opts.variants || []).map((v) => {
+        mux(v.output, v);
+        return v.output;
       });
 
       const check = await ffprobe(output);
@@ -166,6 +173,7 @@ export async function processVideo(input, output, options = {}, onProgress = () 
       if (!vOut || vOut.codec_name !== 'h264') throw new Error('Semakan output gagal (tiada video H.264).');
       return {
         output,
+        variants,
         seconds: (Date.now() - started) / 1000,
         input: {
           file: info.file,

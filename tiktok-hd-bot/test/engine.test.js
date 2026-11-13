@@ -96,6 +96,28 @@ test('iPhone-style HDR source: tone mapped, 30 fps, AAC passthrough + padding + 
   execFileSync('ffmpeg', ['-v', 'error', '-xerror', '-i', output, '-map', '0', '-f', 'null', '-']);
 });
 
+test('clean copy from the same encode: same video bytes, no duplicate AAC, no silent tail, one mdat', async () => {
+  const input = path.join(dir, 'hlg.mov');
+  const haze = path.join(dir, 'variant_haze.mov');
+  const clean = path.join(dir, 'variant_clean.mov');
+  const res = await processVideo(input, haze, { ...FAST, mode: 'hd', variants: [{ output: clean, pad: false, dupAudio: false }] });
+  assert.deepEqual(res.variants, [clean]);
+  const h = parseMovie(haze);
+  const c = parseMovie(clean);
+  try {
+    assert.deepEqual(c.topLevel, ['ftyp', 'wide', 'mdat', 'moov']);
+    assert.deepEqual(c.tracks.map((t) => t.fourcc), ['mp4a', 'avc1']);
+    assert.equal(c.tracks[0].stsdEntries.length, 1);
+    assert.equal(c.tracks[0].samples.length, h.tracks[0].samples.length - 17);
+    assert.equal(md5(c, c.tracks[1].samples), md5(h, h.tracks[1].samples), 'identical H.264 samples');
+    assert.equal(md5(c, c.tracks[0].samples), md5(h, h.tracks[0].samples.slice(0, -17)), 'identical AAC packets');
+  } finally {
+    h.src.close();
+    c.src.close();
+  }
+  execFileSync('ffmpeg', ['-v', 'error', '-xerror', '-i', clean, '-map', '0', '-f', 'null', '-']);
+});
+
 test('SDR full-range source with MP3: upscaled to 4K, audio transcoded to AAC', async () => {
   const input = path.join(dir, 'sdr.mov');
   const output = path.join(dir, 'sdr_hd.mp4');

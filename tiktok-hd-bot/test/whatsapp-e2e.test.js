@@ -109,8 +109,8 @@ test('group: document video in -> converted document out', async () => {
   assert.equal(reply.options.quoted, incoming, 'reply quotes the user message');
   const docMsg = reply.message.documentMessage || reply.message.documentWithCaptionMessage?.message?.documentMessage;
   assert.ok(docMsg, 'WhatsApp document message generated');
-  assert.equal(docMsg.mimetype, 'video/mp4');
-  assert.equal(docMsg.fileName, 'IMG_TEST_hd.mp4');
+  assert.equal(docMsg.mimetype, 'video/quicktime');
+  assert.equal(docMsg.fileName, 'IMG_TEST_hd.mov');
   assert.match(docMsg.caption, /^@201234567890123 ✅ \*Siap!\*/);
   assert.deepEqual(docMsg.contextInfo?.mentionedJid, ['201234567890123@lid'], 'sender is tagged in the group');
   assert.ok(sent.some((s) => s.content.edit && s.message.protocolMessage), 'progress edits are valid edit messages');
@@ -135,4 +135,51 @@ test('group: document video in -> converted document out', async () => {
 
   // 5. Temporary files are cleaned up.
   assert.deepEqual(fs.readdirSync(config.workDir).filter((n) => n.startsWith('wa-')), []);
+});
+
+test('group: ".uji" delivers variants A–E that all decrypt to the expected files', { skip: Boolean(OWN_INPUT) }, async () => {
+  const enc = await encryptedStream({ url: path.join(dir, 'IMG_TEST.MOV') }, 'document', { logger });
+  served.set('/in2.enc', fs.readFileSync(enc.encFilePath));
+  fs.rmSync(enc.encFilePath, { force: true });
+  const incoming = {
+    key: { remoteJid: '120363000000000001@g.us', participant: '201234567890123@lid', id: 'USERMSG2', fromMe: false },
+    messageTimestamp: Math.floor(Date.now() / 1000),
+    message: { documentMessage: { url: `${base}/in2.enc`, mimetype: 'video/quicktime', fileName: 'IMG_TEST.MOV', caption: '.uji', mediaKey: enc.mediaKey, fileSha256: enc.fileSha256, fileEncSha256: enc.fileEncSha256, fileLength: enc.fileLength } },
+  };
+  const sent = [];
+  const sock = {
+    updateMediaMessage: async (m) => m,
+    sendMessage: async (jid, content, options) => {
+      const message = await generateWAMessageContent(content, {
+        logger,
+        jid,
+        upload: async (encFilePath) => {
+          const name = `/u2_${served.size}.enc`;
+          served.set(name, fs.readFileSync(encFilePath));
+          return { mediaUrl: `${base}${name}`, directPath: undefined };
+        },
+      });
+      sent.push({ content, message });
+      return { key: { remoteJid: jid, id: `T${sent.length}`, fromMe: true }, message };
+    },
+  };
+  const config = {
+    prefix: '.', owners: [], allowed: [], replyIn: 'group', groupIds: [], allowSelf: true, autoProcess: true,
+    defaultMode: 'hd', defaultFps: 30, preset: 'ultrafast', crf: 17, maxFileMb: 100, maxDurationSec: 300,
+    encoderTag: 'TikTok HD Bot', docFormat: 'mov', outputStyle: 'clean', workDir: path.join(dir, 'work2'),
+  };
+  const handle = createRouter({ config, queue: new JobQueue(1), ...createDeps({ getSock: () => sock, logger, config }) });
+  await handle(incoming);
+
+  const docs = sent.filter((s) => s.content.document).map((s) => s.message.documentMessage || s.message.documentWithCaptionMessage?.message?.documentMessage);
+  assert.deepEqual(docs.map((d) => d.fileName[0]), ['A', 'B', 'C', 'D', 'E']);
+  const bodies = [];
+  for (const d of docs) bodies.push(await downloadMediaMessage({ key: { id: 'x' }, message: { documentMessage: d } }, 'buffer', {}));
+  const sha = (b) => crypto.createHash('sha256').update(b).digest('hex');
+  assert.equal(sha(bodies[0]), sha(bodies[1]), 'A and B are the same file');
+  assert.equal(sha(bodies[0]), sha(bodies[3]), 'A and D are the same file');
+  assert.notEqual(sha(bodies[2]), sha(bodies[0]), 'C is the clean variant');
+  assert.equal(sha(bodies[4]), sha(fs.readFileSync(path.join(dir, 'IMG_TEST.MOV'))), 'E is the untouched original');
+  assert.equal(bodies[2].includes('mdat') && bodies[2].indexOf('mdat') === bodies[2].lastIndexOf('mdat'), true, 'clean copy has a single mdat');
+  assert.match(sent.at(-1).content.text, /Ujian siap/);
 });

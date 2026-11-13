@@ -54,9 +54,11 @@ boleh dihantar terus dengan pilihan *Upload HD*, jadi pelayan TikTok encode dari
 4. **Encode x264** — High@5.1, GOP 1 s tertutup, 3 B-frame piramid, 4 ref, CRF 17 dihadkan ~11 Mbps (4K).
    Banner SEI x264 dibuang — tiada jejak "x264"/"Lavf" dalam fail.
 5. **Remux gaya iPhone** (muxer JavaScript sendiri, `src/engine/mux.js`):
-   AAC asal disalin bit-exact + 17 frame senyap dalam `mdat` kedua, APAC & 6 trek `mebx` disalin,
-   rujukan trek (`fall`, `cdsc`, `cdep`, `rndr`) dipeta semula, trek AAC pendua, `tapt`, `cslg`, `sdtp`,
+   AAC asal disalin bit-exact, APAC & 6 trek `mebx` disalin, rujukan trek (`fall`, `cdsc`, `cdep`,
+   `rndr`) dipeta semula, `tapt`, `cslg`, `sdtp`,
    `colr nclc`, `amve`, timescale 600, handler "Core Media", `moov` di hujung, GPS/model/tarikh dibuang.
+   Gaya `haze` menambah dua keanehan fail Haze: 17 frame senyap dalam `mdat` kedua dan trek AAC pendua
+   (lalai `clean` tidak, kerana versi itu gagal dimuat turun di iPhone — lihat bahagian 4).
 6. **Semak** — output dibaca semula dengan ffprobe sebelum dihantar.
 
 ### Keputusan sebenar pada `IMG_1880.MOV`
@@ -131,7 +133,7 @@ kemudian ahli group hantar video **sebagai DOKUMEN** (📎 → Dokumen → pilih
 ```
 Ahli  ── 📎 Dokumen: IMG_1880.MOV ─────────────────────────────▶  Group
 Bot   ── "⬇️ Memuat turun..." → "⚙️ Encode video ████░░ 40%"     (satu mesej, dikemas kini)
-Bot   ── 📄 Dokumen: IMG_1880_hd.mp4, quote + @tag pengirim ─────▶  Group
+Bot   ── 📄 Dokumen: IMG_1880_hd.mov, quote + @tag pengirim ─────▶  Group
 ```
 
 Tak perlu taip apa-apa — hantar dokumen sahaja sudah cukup (mod `max`). Dalam group, bot senyap
@@ -144,6 +146,8 @@ untuk sembang biasa, video biasa dan fail bukan video; ia hanya bertindak pada d
 | `REPLY_IN=all` | kedua-duanya |
 | `GROUP_IDS=...@g.us` | hadkan kepada group tertentu (hantar `.id` dalam group untuk dapat ID) |
 | `ALLOW_SELF=true` | kalau bot guna nombor anda sendiri: hantar dokumen dengan kapsyen `.max` dari telefon itu |
+| `DOC_FORMAT=mov` | fail balasan `.mov` / `video/quicktime` (lalai, padan dengan kandungan QuickTime); `mp4` = `.mp4` |
+| `OUTPUT_STYLE=clean` | bekas gaya iPhone tanpa trek AAC pendua & 17 frame senyap (lalai); `haze` = susun atur penuh fail Haze |
 
 | Arahan | Fungsi |
 |---|---|
@@ -155,10 +159,32 @@ untuk sembang biasa, video biasa dan fail bukan video; ia hanya bertindak pada d
 | `.info` | semak video sedia TikTok HD atau tidak (macam "checker" Haze) |
 | `.status` | barisan giliran |
 | `.id` | tunjuk ID group (untuk `GROUP_IDS`) |
+| `.max haze` / `.max bersih` | paksa gaya bekas untuk satu video |
+| `.uji` | satu encode, 5 cara hantar (A–E) — untuk tengok mana yang iPhone boleh muat turun |
 | `.menu` | bantuan |
 
 Arahan boleh ditulis pada kapsyen dokumen, atau *reply* video/dokumen dengan arahan
 (contoh: reply video biasa dalam group dengan `.max` untuk tetap proses).
+
+### "Couldn't download document" di iPhone
+
+WhatsApp iPhone memeriksa kandungan fail selepas muat turun dan menunjukkan *Couldn't download* jika
+ia menolak fail itu, walaupun fail di pelayan WhatsApp utuh (corak sama dalam
+[isu Baileys #2867](https://github.com/WhiskeySockets/Baileys/issues/2867)). Versi awal bot menghantar
+susun atur penuh fail Haze sebagai `.mp4` dan iPhone gagal memuat turunnya. Sebab itu lalai sekarang ialah
+`.mov` gaya iPhone bersih — rupa fail sama seperti video iPhone biasa. Untuk tahu punca tepat,
+hantar satu video dengan kapsyen `.uji`:
+
+| Fail | Isi | Dihantar sebagai |
+|---|---|---|
+| A | gaya Haze penuh | `.mp4`, `video/mp4` (format lama) |
+| B | gaya Haze penuh | `.mov`, `video/quicktime` |
+| C | gaya iPhone bersih | `.mov`, `video/quicktime` (lalai) |
+| D | gaya Haze penuh | `.mp4`, `application/octet-stream` |
+| E | fail asal anda tanpa diubah (≤ 64 MB) | kawalan — kalau E pun gagal, masalahnya rangkaian/upload |
+
+Kalau B atau D boleh dimuat turun, susun atur penuh Haze boleh digunakan: `OUTPUT_STYLE=haze`
+(dengan `DOC_FORMAT=mov` untuk B).
 Bot pulangkan fail sebagai dokumen (supaya WhatsApp tidak mampat semula), dengan langkah upload:
 
 1. Buka dokumen → Kongsi → **Simpan Video** (masuk galeri).
@@ -178,7 +204,8 @@ node src/cli.js compare IMG_1880_haze.mp4 out.mp4 # banding trek demi trek
 ### Tetapan `.env`
 
 Lihat `.env.example`. Yang penting: `BOT_NUMBER`, `REPLY_IN`, `GROUP_IDS`, `ALLOWED_NUMBERS`
-(hadkan pengguna), `DEFAULT_MODE`, `X264_PRESET`, `MAX_FILE_MB`, `MAX_DURATION_SEC`, `ENCODER_TAG`.
+(hadkan pengguna), `DOC_FORMAT`, `OUTPUT_STYLE`, `DEFAULT_MODE`, `X264_PRESET`, `MAX_FILE_MB`,
+`MAX_DURATION_SEC`, `ENCODER_TAG`.
 
 ---
 

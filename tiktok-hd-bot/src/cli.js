@@ -22,6 +22,7 @@ Pilihan:
   --no-pad              jangan tambah 17 frame AAC senyap
   --no-dup-audio        jangan gandakan trek AAC
   --no-apple-tracks     buang trek metadata kamera iPhone (mebx/APAC)
+  --clean-copy <fail>   tulis juga salinan "bersih" (tanpa AAC pendua & frame senyap) dari encode yang sama
   --json                cetak kemajuan & keputusan sebagai baris JSON`;
 
 function parseArgs(argv) {
@@ -116,6 +117,7 @@ async function main() {
     pad: args.pad !== false,
     dupAudio: args['dup-audio'] !== false,
     keepAppleTracks: args['apple-tracks'] !== false,
+    variants: args['clean-copy'] ? [{ output: args['clean-copy'], pad: false, dupAudio: false }] : undefined,
   };
   let lastPrint = 0;
   const res = await processVideo(input, output, options, (p) => {

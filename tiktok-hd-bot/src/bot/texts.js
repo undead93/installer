@@ -14,6 +14,7 @@ export function menu(p, inGroup = false) {
     `• ${p}keep — kekal resolusi asal`,
     `• ${p}info — semak video sedia TikTok HD atau tidak`,
     `• ${p}status — lihat barisan giliran`,
+    `• ${p}uji — hantar 5 versi fail untuk uji mana yang boleh dimuat turun`,
     `Tambah *60* untuk 60fps, contoh: ${p}max 60`,
     '',
     `⚠️ Video biasa (bukan dokumen) sudah dimampat WhatsApp${inGroup ? ` — dalam group, reply video itu dengan *${p}max* kalau tetap mahu proses` : ''}.`,
@@ -36,6 +37,14 @@ export function progress(stage, percent, fps) {
   const bar = '█'.repeat(Math.round(pct / 10)).padEnd(10, '░');
   const label = stage === 'mux' ? 'Menyusun fail' : 'Encode video';
   return `⚙️ ${label}\n${bar} ${pct.toFixed(0)}%${fps ? ` • ${fps} fps` : ''}`;
+}
+
+export function testDone(labels) {
+  return [
+    `🧪 *Ujian siap* — ${labels.length} dokumen dihantar (${labels.join(', ')}).`,
+    'Tekan setiap satu untuk muat turun di iPhone.',
+    'Balas dengan huruf yang *BOLEH* dimuat turun, contoh: *C, E*',
+  ].join('\n');
 }
 
 export function status(queue) {

@@ -58,6 +58,7 @@ function setup(overrides = {}) {
       onProgress({ stage: 'mux', percent: 100 });
       if (gate) await gate;
       fs.writeFileSync(output, 'result');
+      if (opts.cleanCopy) fs.writeFileSync(opts.cleanCopy, 'clean');
       return fakeResult;
     },
     analyzeText: async (file) => {
@@ -94,11 +95,13 @@ test('default = group only: a document in the group comes back converted, quotin
   await handle(gm(doc('')));
   assert.equal(calls.engine.length, 1);
   assert.equal(calls.engine[0].opts.mode, 'max');
+  assert.equal(calls.engine[0].opts.pad, false, 'clean iPhone-style container by default');
+  assert.equal(calls.engine[0].opts.dupAudio, false);
   const file = sent.find((s) => s.content.document);
   assert.ok(file, 'result document sent');
   assert.equal(file.chat, GROUP);
-  assert.equal(file.content.mimetype, 'video/mp4');
-  assert.equal(file.content.fileName, 'IMG_1880_hd.mp4');
+  assert.equal(file.content.mimetype, 'video/quicktime', 'QuickTime content goes out as .mov');
+  assert.equal(file.content.fileName, 'IMG_1880_hd.mov');
   assert.ok(file.options.quoted, 'quotes the original message');
   assert.deepEqual(file.content.mentions, ['201234567890123@lid']);
   assert.match(file.content.caption, /^@201234567890123 ✅ \*Siap!\*/);
@@ -150,7 +153,7 @@ test('private: document with ".hd" caption is processed and returned as a docume
   assert.equal(calls.engine[0].opts.mode, 'hd');
   assert.match(calls.engine[0].input, /input\.mov$/);
   const file = sent.find((s) => s.content.document);
-  assert.equal(file.content.fileName, 'IMG_1880_hd.mp4');
+  assert.equal(file.content.fileName, 'IMG_1880_hd.mov');
   assert.equal(file.content.mentions, undefined, 'no tag in private chats');
   assert.match(file.content.caption, /^✅ \*Siap!\*/);
 });
@@ -214,4 +217,49 @@ test('one job per user: a second video while the first runs is refused politely'
   s.release();
   await first;
   assert.equal(s.calls.engine.length, 1);
+});
+
+// ---------------------------------------------------------------- delivery format + .uji diagnostics
+
+test('DOC_FORMAT=mp4 + OUTPUT_STYLE=haze restore the reference layout; per-message "bersih"/"haze" override', async () => {
+  const { handle, sent, calls } = setup({ config: { docFormat: 'mp4', outputStyle: 'haze' } });
+  await handle(gm(doc('')));
+  assert.equal(calls.engine[0].opts.pad, true);
+  assert.equal(calls.engine[0].opts.dupAudio, true);
+  const file = sent.find((s) => s.content.document);
+  assert.equal(file.content.fileName, 'IMG_1880_hd.mp4');
+  assert.equal(file.content.mimetype, 'video/mp4');
+  const b = setup({ config: { outputStyle: 'haze' } });
+  await b.handle(gm(doc('.max bersih')));
+  assert.equal(b.calls.engine[0].opts.pad, false);
+  const c = setup();
+  await c.handle(gm(doc('.max haze')));
+  assert.equal(c.calls.engine[0].opts.dupAudio, true);
+});
+
+test('".uji" encodes once and sends variants A–E plus instructions', async () => {
+  const { handle, sent, calls } = setup();
+  const small = doc('.uji');
+  small.documentWithCaptionMessage.message.documentMessage.fileLength = 20e6;
+  await handle(gm(small));
+  assert.equal(calls.engine.length, 1, 'one encode only');
+  const opts = calls.engine[0].opts;
+  assert.equal(opts.pad, true);
+  assert.equal(opts.dupAudio, true);
+  assert.match(opts.cleanCopy, /clean\.mov$/);
+  const docs = sent.filter((s) => s.content.document);
+  assert.deepEqual(docs.map((d) => d.content.fileName), ['A_IMG_1880_haze.mp4', 'B_IMG_1880_haze.mov', 'C_IMG_1880_bersih.mov', 'D_IMG_1880_haze.mp4', 'E_asal_IMG_1880.MOV']);
+  assert.deepEqual(docs.map((d) => d.content.mimetype), ['video/mp4', 'video/quicktime', 'video/quicktime', 'application/octet-stream', 'video/quicktime']);
+  assert.equal(docs[2].content.document.url, opts.cleanCopy, 'C is the clean copy');
+  assert.equal(docs[0].content.document.url, docs[1].content.document.url, 'A/B/D share the same bytes');
+  assert.match(docs[4].content.document.url, /input\.mov$/, 'E is the untouched original');
+  assert.match(sent.at(-1).content.text, /Ujian siap[\s\S]*A, B, C, D, E/);
+});
+
+test('".uji" skips the original-file control when the original is big', async () => {
+  const { handle, sent } = setup();
+  await handle(gm(doc('.uji'))); // 81 MB original
+  const names = sent.filter((s) => s.content.document).map((d) => d.content.fileName);
+  assert.equal(names.length, 4);
+  assert.ok(!names.some((n) => n.startsWith('E_')));
 });
