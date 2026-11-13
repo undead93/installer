@@ -55,7 +55,7 @@ function videoFilter({ fps, hdr, src, dst, caps }) {
     // Resize where it is cheapest: before tone mapping when shrinking, after when enlarging.
     if (resize && down) f.push(`zscale=w=${dst.w}:h=${dst.h}:f=lanczos`);
     // HLG/PQ -> linear (203 nit reference white) -> BT.709 primaries -> Hable tone curve -> BT.709 SDR.
-    // Tuned against the reference HD file: ~36.4 dB PSNR vs Apple's own conversion.
+    // Tuned against the reference HD file: ~36 dB PSNR vs Apple's own conversion.
     f.push('zscale=t=linear:npl=203', 'format=gbrpf32le', 'zscale=p=bt709', `tonemap=hable:desat=2${hdr === 'hlg' ? ':peak=10' : ''}`, 'zscale=t=bt709:m=bt709:r=tv');
     if (resize && !down) f.push(`zscale=w=${dst.w}:h=${dst.h}:f=lanczos`);
   } else {

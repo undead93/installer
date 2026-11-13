@@ -49,7 +49,7 @@ boleh dihantar terus dengan pilihan *Upload HD*, jadi pelayan TikTok encode dari
 
 1. **Analisis** — ffprobe + parser MOV sendiri (baca trek `mebx`, APAC, kunci `com.apple.quicktime.*`).
 2. **Tonemap HDR → SDR** — `zscale` (linear, putih rujukan 203 nit) → BT.709 → lengkung Hable → BT.709.
-   Ditala dengan grid search terhadap frame Haze: **36.4 dB PSNR** berbanding penukaran Apple sendiri.
+   Ditala dengan grid search terhadap frame Haze: **~36 dB PSNR** berbanding penukaran Apple sendiri.
 3. **30fps** — sama seperti Haze (1 daripada 4 frame untuk sumber 120fps). Tidak pernah gandakan frame.
 4. **Encode x264** — High@5.1, GOP 1 s tertutup, 3 B-frame piramid, 4 ref, CRF 17 dihadkan ~11 Mbps (4K).
    Banner SEI x264 dibuang — tiada jejak "x264"/"Lavf" dalam fail.
