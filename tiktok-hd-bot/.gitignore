@@ -1,0 +1,8 @@
+node_modules/
+session/
+tmp/
+.env
+*.mov
+*.MOV
+*.mp4
+*.m4a
