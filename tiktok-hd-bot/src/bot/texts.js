@@ -32,9 +32,10 @@ export const downloading = () => '⬇️ Memuat turun video...';
 export const failed = (msg) => `❌ Gagal: ${msg}`;
 
 export function progress(stage, percent, fps) {
-  const bar = '█'.repeat(Math.round(percent / 10)).padEnd(10, '░');
+  const pct = Number.isFinite(Number(percent)) && percent !== null ? Math.max(0, Math.min(100, Number(percent))) : 0;
+  const bar = '█'.repeat(Math.round(pct / 10)).padEnd(10, '░');
   const label = stage === 'mux' ? 'Menyusun fail' : 'Encode video';
-  return `⚙️ ${label}\n${bar} ${percent.toFixed(0)}%${fps ? ` • ${fps} fps` : ''}`;
+  return `⚙️ ${label}\n${bar} ${pct.toFixed(0)}%${fps ? ` • ${fps} fps` : ''}`;
 }
 
 export function status(queue) {

@@ -1,82 +1,25 @@
 // WhatsApp bot entry point: connection, login (QR or pairing code) and wiring of the router.
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
-import { Transform } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
-import makeWASocket, { Browsers, DisconnectReason, downloadMediaMessage, fetchLatestBaileysVersion, useMultiFileAuthState } from 'baileys';
+import makeWASocket, { Browsers, DisconnectReason, fetchLatestBaileysVersion, useMultiFileAuthState } from 'baileys';
 import pino from 'pino';
 import qrcode from 'qrcode-terminal';
 import { config, ROOT } from '../config.js';
-import { analyze, formatAnalysis } from '../engine/analyze.js';
-import { detectCaps, ffprobe } from '../engine/ffmpeg.js';
+import { detectCaps } from '../engine/ffmpeg.js';
+import { createDeps } from './deps.js';
 import { JobQueue } from './queue.js';
 import { createRouter } from './router.js';
 
-const CLI = path.join(ROOT, 'src', 'cli.js');
 const logger = pino({ level: config.logLevel });
 const current = { sock: null };
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 let retries = 0;
 
-/** Run the engine in a child process so encoding never blocks the WhatsApp socket. */
-function runEngine(input, output, opts, onProgress) {
-  return new Promise((resolve, reject) => {
-    const args = [CLI, input, '-o', output, '--json', '--mode', opts.mode, '--fps', String(opts.fps), '--preset', opts.preset, '--crf', String(opts.crf), '--tag', config.encoderTag];
-    const child = spawn(process.execPath, args, { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, TMPDIR: config.workDir } });
-    let buf = '';
-    let stderr = '';
-    let result = null;
-    let error = null;
-    child.stdout.on('data', (d) => {
-      buf += d;
-      let i;
-      while ((i = buf.indexOf('\n')) >= 0) {
-        const line = buf.slice(0, i);
-        buf = buf.slice(i + 1);
-        let m;
-        try {
-          m = JSON.parse(line);
-        } catch {
-          continue;
-        }
-        if (m.type === 'progress') onProgress(m);
-        else if (m.type === 'done') result = m;
-        else if (m.type === 'error') error = m.message;
-      }
-    });
-    child.stderr.on('data', (d) => (stderr = (stderr + d).slice(-4000)));
-    child.on('error', reject);
-    child.on('close', (code) => (result ? resolve(result) : reject(new Error(error || stderr.trim().split('\n').pop() || `enjin keluar dengan kod ${code}`))));
-  });
-}
-
 const handle = createRouter({
   config,
   queue: new JobQueue(config.concurrency),
   log,
-  send: (chat, content, options) => current.sock.sendMessage(chat, content, options),
-  download: async (waMessage, file) => {
-    const stream = await downloadMediaMessage(waMessage, 'stream', {}, { logger, reuploadRequest: current.sock.updateMediaMessage });
-    // Enforce the size limit on the bytes actually received, not only on the size the message claims.
-    const limit = config.maxFileMb * 1048576;
-    let received = 0;
-    const guard = new Transform({
-      transform(chunk, _enc, cb) {
-        received += chunk.length;
-        cb(received > limit ? new Error(`fail melebihi had ${config.maxFileMb} MB`) : null, chunk);
-      },
-    });
-    await pipeline(stream, guard, fs.createWriteStream(file));
-  },
-  probeDuration: async (file) => Number((await ffprobe(file)).format?.duration || 0),
-  runEngine,
-  analyzeText: async (file, media) => {
-    const a = await analyze(file);
-    a.movie?.src.close();
-    a.file = media.node.fileName || a.file;
-    return formatAnalysis(a);
-  },
+  ...createDeps({ getSock: () => current.sock, logger, config }),
 });
 
 async function connect() {

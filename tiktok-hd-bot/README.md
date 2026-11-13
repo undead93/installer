@@ -128,6 +128,14 @@ nombor disekat.
 Pengguna hantar video kepada bot **sebagai DOKUMEN** (📎 → Dokumen → pilih video).
 Video yang dihantar sebagai "video" biasa sudah dimampat WhatsApp — bot tetap proses tetapi beri amaran.
 
+```
+Anda  ── 📎 Dokumen: IMG_1880.MOV ─────────────────────────▶  Bot
+Bot   ── "⬇️ Memuat turun..." → "⚙️ Encode video ████░░ 40%"   (satu mesej, dikemas kini)
+Bot   ── 📄 Dokumen: IMG_1880_hd.mp4 + ringkasan + cara upload ─▶  Anda
+```
+
+Tak perlu taip apa-apa — hantar dokumen sahaja sudah cukup (mod `max`).
+
 | Arahan | Fungsi |
 |---|---|
 | (hantar dokumen sahaja) | proses dengan mod lalai (`max`) |
@@ -178,8 +186,25 @@ src/engine/mux.js       susun trek seperti fail Haze/iPhone
 src/engine/aac.js       esds / AudioSpecificConfig / frame AAC senyap
 src/engine/pipeline.js  analisis → ffmpeg/x264 → mux → semak
 src/engine/analyze.js   laporan & semakan "TikTok HD"
-src/bot/                bot WhatsApp (Baileys v7): router, giliran, teks
-test/                   ujian (npm test) — video sintetik + socket WhatsApp palsu
+src/bot/index.js        sambungan WhatsApp (Baileys v7), log masuk QR / kod pairing
+src/bot/router.js       logik mesej: dokumen masuk → giliran → proses → dokumen keluar
+src/bot/deps.js         muat turun/nyahsulit media, enjin (proses anak), analisis
+test/                   ujian (npm test)
+```
+
+### Ujian
+
+```bash
+npm test
+```
+
+Termasuk ujian hujung-ke-hujung `test/whatsapp-e2e.test.js`: video dienkrip sebagai dokumen WhatsApp
+sebenar (kod enkripsi Baileys), bot memuat turun & menyahsulit dengan `downloadMediaMessage`, convert,
+membina dokumen balasan dengan `generateWAMessageContent`, kemudian balasan dinyahsulit dan disemak.
+Hanya soket WhatsApp yang palsu. Uji dengan video anda sendiri:
+
+```bash
+E2E_INPUT=/path/IMG_1880.MOV E2E_KEEP=/path/hasil.mp4 node --test test/whatsapp-e2e.test.js
 ```
 
 Projek ini tiada kaitan dengan Haze. Ia tidak menyalin kod Haze — hanya meniru format fail output

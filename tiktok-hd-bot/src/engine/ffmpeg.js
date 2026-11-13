@@ -75,8 +75,9 @@ export async function runFfmpeg(args, { duration = 0, onProgress, signal } = {})
       const v = line.slice(i + 1).trim();
       state[k] = v;
       if (k === 'progress' && onProgress) {
+        // The first report says out_time_us=N/A — keep percent a finite number no matter what ffmpeg prints.
         const t = Number(state.out_time_us || state.out_time_ms || 0) / 1e6;
-        const percent = duration > 0 ? Math.max(0, Math.min(100, (t / duration) * 100)) : 0;
+        const percent = duration > 0 && Number.isFinite(t) ? Math.max(0, Math.min(100, (t / duration) * 100)) : 0;
         onProgress({ percent, fps: Number(state.fps) || 0, speed: state.speed || '', done: v === 'end' });
       }
     },

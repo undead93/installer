@@ -102,10 +102,14 @@ export function createRouter(deps) {
       const output = path.join(dir, `${baseFor(media.node)}_hd.mp4`);
       let last = 0;
       const res = await deps.runEngine(input, output, opts, (p) => {
-        const now = Date.now();
-        if (now - last > 8000 || p.stage === 'mux') {
-          last = now;
-          setStatus(T.progress(p.stage, p.percent, p.fps));
+        try {
+          const now = Date.now();
+          if (now - last > 8000 || p.stage === 'mux') {
+            last = now;
+            setStatus(T.progress(p.stage, p.percent, p.fps));
+          }
+        } catch (err) {
+          log(`progress update skipped: ${err.message}`); // a status message must never break the job
         }
       });
       await setStatus('✅ Selesai — menghantar fail...');
