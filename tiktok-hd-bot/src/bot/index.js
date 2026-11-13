@@ -15,11 +15,32 @@ const current = { sock: null };
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 let retries = 0;
 
+// Group metadata cache: every message (and every progress edit) sent to a group needs it, and
+// fetching it each time hits WhatsApp's rate limit. Only groups the bot actually replies in are cached.
+const GROUP_TTL = 5 * 60_000;
+const groupCache = new Map();
+const cachedGroup = (jid) => {
+  const e = groupCache.get(jid);
+  return e && Date.now() - e.at < GROUP_TTL ? e.data : undefined;
+};
+async function refreshGroup(jid) {
+  try {
+    groupCache.set(jid, { data: await current.sock.groupMetadata(jid), at: Date.now() });
+  } catch (err) {
+    logger.debug({ err, jid }, 'group metadata fetch failed');
+  }
+}
+
+const deps = createDeps({ getSock: () => current.sock, logger, config });
 const handle = createRouter({
   config,
   queue: new JobQueue(config.concurrency),
   log,
-  ...createDeps({ getSock: () => current.sock, logger, config }),
+  ...deps,
+  send: async (chat, content, options) => {
+    if (chat.endsWith('@g.us') && !cachedGroup(chat)) await refreshGroup(chat);
+    return deps.send(chat, content, options);
+  },
 });
 
 async function connect() {
@@ -33,9 +54,12 @@ async function connect() {
     markOnlineOnConnect: false,
     syncFullHistory: false,
     getMessage: async () => undefined,
+    cachedGroupMetadata: async (jid) => cachedGroup(jid),
   });
   current.sock = sock;
   sock.ev.on('creds.update', saveCreds);
+  sock.ev.on('groups.update', (updates) => updates.forEach((u) => u.id && groupCache.has(u.id) && refreshGroup(u.id)));
+  sock.ev.on('group-participants.update', (u) => groupCache.has(u.id) && refreshGroup(u.id));
 
   let pairingAsked = false;
   sock.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
@@ -58,7 +82,8 @@ async function connect() {
     }
     if (connection === 'open') {
       retries = 0;
-      log(`✅ Bot dalam talian sebagai ${sock.user?.id?.split(':')[0]}`);
+      const where = { group: 'group sahaja', private: 'chat peribadi sahaja', all: 'group + chat peribadi' }[config.replyIn];
+      log(`✅ Bot dalam talian sebagai ${sock.user?.id?.split(':')[0]} • layan: ${where}${config.groupIds.length ? ` (${config.groupIds.length} group dipilih)` : ''}`);
     }
     if (connection === 'close') {
       const code = lastDisconnect?.error?.output?.statusCode;

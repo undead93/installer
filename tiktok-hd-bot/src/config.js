@@ -33,8 +33,15 @@ export const config = {
   prefix: env.PREFIX || '.',
   owners: list(env.OWNER_NUMBER),
   allowed: list(env.ALLOWED_NUMBERS), // empty = everyone may use the bot
-  allowGroups: bool(env.ALLOW_GROUPS, false),
-  autoProcess: bool(env.AUTO_PROCESS, true), // process any video sent in private chat without a command
+  // Where the bot answers: group (default) | private | all
+  replyIn: ['group', 'private', 'all'].includes(String(env.REPLY_IN).toLowerCase()) ? String(env.REPLY_IN).toLowerCase() : 'group',
+  // Optional: only these groups (JIDs like 1203630xxxxxxxx@g.us — send ".id" in a group to see it)
+  groupIds: String(env.GROUP_IDS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
+  allowSelf: bool(env.ALLOW_SELF, true), // the bot's own number may use commands (useful on a personal number)
+  autoProcess: bool(env.AUTO_PROCESS, true), // a video sent as a document is converted without any command
   defaultMode: ['max', 'hd', 'keep'].includes(env.DEFAULT_MODE) ? env.DEFAULT_MODE : 'max',
   defaultFps: num(env.DEFAULT_FPS, 30),
   preset: env.X264_PRESET || 'medium',

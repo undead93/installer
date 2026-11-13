@@ -75,25 +75,41 @@ export function optionsFrom(config, mode, args = []) {
  *   runEngine(input, output, opts, onProgress) -> Promise<result>,
  *   analyzeText(file, media) -> Promise<string>,
  * }
+ *
+ * config.replyIn: 'group' (default) | 'private' | 'all' — where the bot answers.
+ * config.groupIds: optional list of group JIDs the bot is limited to.
  */
 export function createRouter(deps) {
   const { config, queue, log = () => {} } = deps;
+  const replyIn = config.replyIn || 'group';
+  const groupIds = config.groupIds || [];
   const startedAt = Math.floor(Date.now() / 1000);
 
-  async function processJob({ chat, msg, media, opts }) {
+  // Remember what the bot itself sent, so its own messages never trigger it again.
+  const sentIds = new Set();
+  const send = async (chat, content, options) => {
+    const res = await deps.send(chat, content, options);
+    if (res?.key?.id) {
+      sentIds.add(res.key.id);
+      if (sentIds.size > 1000) sentIds.delete(sentIds.values().next().value);
+    }
+    return res;
+  };
+
+  async function processJob({ chat, msg, media, opts, isGroup, user }) {
     fs.mkdirSync(config.workDir, { recursive: true });
     const dir = fs.mkdtempSync(path.join(config.workDir, 'wa-'));
     let statusKey = null;
     const setStatus = async (text) => {
       try {
-        if (!statusKey) statusKey = (await deps.send(chat, { text }, { quoted: msg }))?.key;
-        else await deps.send(chat, { text, edit: statusKey });
+        if (!statusKey) statusKey = (await send(chat, { text }, { quoted: msg }))?.key;
+        else await send(chat, { text, edit: statusKey });
       } catch {
         // progress edits are best effort
       }
     };
     try {
-      if (media.kind === 'video') await deps.send(chat, { text: T.compressedWarning() }, { quoted: msg });
+      if (media.kind === 'video') await send(chat, { text: T.compressedWarning() }, { quoted: msg });
       await setStatus(T.downloading());
       const input = path.join(dir, `input${extFor(media.node)}`);
       await deps.download(media.waMessage, input);
@@ -104,7 +120,7 @@ export function createRouter(deps) {
       const res = await deps.runEngine(input, output, opts, (p) => {
         try {
           const now = Date.now();
-          if (now - last > 8000 || p.stage === 'mux') {
+          if (now - last > 12000 || p.stage === 'mux') {
             last = now;
             setStatus(T.progress(p.stage, p.percent, p.fps));
           }
@@ -113,7 +129,11 @@ export function createRouter(deps) {
         }
       });
       await setStatus('✅ Selesai — menghantar fail...');
-      await deps.send(chat, { document: { url: output }, mimetype: 'video/mp4', fileName: path.basename(output), caption: T.done(res) }, { quoted: msg });
+      // In a group, tag the sender so they get notified even in a busy chat.
+      const tag = isGroup && user ? `@${user.split('@')[0].split(':')[0]} ` : '';
+      const doc = { document: { url: output }, mimetype: 'video/mp4', fileName: path.basename(output), caption: tag + T.done(res) };
+      if (tag) doc.mentions = [user];
+      await send(chat, doc, { quoted: msg });
       log(`done ${path.basename(output)} in ${Math.round(res.seconds)}s`);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
@@ -128,21 +148,22 @@ export function createRouter(deps) {
       await deps.download(media.waMessage, input);
       const text = await deps.analyzeText(input, media);
       const note = media.kind === 'video' ? '\n\nℹ️ Ini video yang sudah dimampat WhatsApp — hantar sebagai dokumen untuk semak fail asal.' : '';
-      await deps.send(chat, { text: text + note }, { quoted: msg });
+      await send(chat, { text: text + note }, { quoted: msg });
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   }
 
-  async function enqueue({ chat, msg, user }, media, opts) {
-    const reply = (text) => deps.send(chat, { text }, { quoted: msg });
+  async function enqueue(ctx, media, opts) {
+    const { chat, msg, user } = ctx;
+    const reply = (text) => send(chat, { text }, { quoted: msg });
     if (!isVideoNode(media)) return reply(T.notVideo());
     if (queue.has(user)) return reply(T.alreadyQueued(queue.position(user)));
     const size = toNum(media.node.fileLength);
     if (size > config.maxFileMb * 1048576) return reply(T.tooBig(size, config.maxFileMb));
     const seconds = toNum(media.node.seconds);
     if (seconds > config.maxDurationSec) return reply(T.tooLong(seconds, config.maxDurationSec));
-    const job = queue.push(user, () => processJob({ chat, msg, media, opts }));
+    const job = queue.push(user, () => processJob({ ...ctx, media, opts }));
     const pos = queue.position(user);
     if (pos > 0) await reply(T.queued(pos));
     try {
@@ -154,27 +175,41 @@ export function createRouter(deps) {
   }
 
   return async function handle(msg) {
-    if (!msg?.message || msg.key?.fromMe || !msg.key?.remoteJid) return;
+    if (!msg?.message || !msg.key?.remoteJid) return;
     const chat = msg.key.remoteJid;
     if (chat === 'status@broadcast' || chat.endsWith('@newsletter') || chat.endsWith('@broadcast')) return;
+    if (msg.key.fromMe && (config.allowSelf === false || sentIds.has(msg.key.id))) return;
     const ts = toNum(msg.messageTimestamp);
     if (ts && ts < startedAt - 1800) return; // ignore a stale backlog after downtime
-    const who = senderOf(msg);
-    if (who.isGroup && !config.allowGroups) return;
-    if (config.allowed.length && !who.numbers.some((n) => config.allowed.includes(n) || config.owners.includes(n))) return;
 
+    const who = senderOf(msg);
     const content = normalizeMessageContent(msg.message);
     const text = textOf(content);
+    const cmd = parseCommand(text, config.prefix);
+    // Messages typed on the bot's own number only count when they are commands (e.g. a document captioned ".max").
+    if (msg.key.fromMe && !cmd) return;
+    const reply = (t) => send(chat, { text: t }, { quoted: msg });
+
+    // Where the bot works.
+    if (who.isGroup) {
+      if (replyIn === 'private') return;
+      if (cmd?.name === 'id') return reply(`🆔 ID group ini:\n${chat}`);
+      if (groupIds.length && !groupIds.includes(chat)) return;
+    } else if (replyIn === 'group') {
+      return;
+    }
+    // Optional allow-list of people (the bot's own number is always allowed).
+    if (config.allowed.length && !msg.key.fromMe && !who.numbers.some((n) => config.allowed.includes(n) || config.owners.includes(n))) return;
+
     const own = mediaOf(content);
     const media = own ? { ...own, waMessage: msg } : quotedOf(msg, content);
-    const cmd = parseCommand(text, config.prefix);
-    const ctx = { chat, msg, user: who.user };
-    const reply = (t) => deps.send(chat, { text: t }, { quoted: msg });
+    const ctx = { chat, msg, user: who.user, isGroup: who.isGroup };
 
     if (cmd) {
       const { name, args } = cmd;
-      if (['menu', 'help', 'start', 'bantuan'].includes(name)) return reply(T.menu(config.prefix));
+      if (['menu', 'help', 'start', 'bantuan'].includes(name)) return reply(T.menu(config.prefix, who.isGroup));
       if (name === 'ping') return reply('pong 🏓');
+      if (name === 'id') return reply(`🆔 ${chat}`);
       if (['status', 'queue', 'giliran'].includes(name)) return reply(T.status(queue));
       if (['info', 'cek', 'check', 'semak'].includes(name)) {
         if (!media) return reply(T.needMedia(config.prefix, name));
@@ -188,13 +223,17 @@ export function createRouter(deps) {
         if (!media) return reply(T.needMedia(config.prefix, name));
         return enqueue(ctx, media, optionsFrom(config, MODE_ALIASES[name], args));
       }
-      if (who.isGroup) return; // unknown command in a group: stay quiet
+      return; // unknown command: stay quiet
     }
 
-    if (own && config.autoProcess && !who.isGroup) {
-      if (!isVideoNode(own)) return own.kind === 'document' ? reply(T.notVideo()) : undefined;
-      return enqueue(ctx, media, optionsFrom(config, config.defaultMode, text.toLowerCase().split(/\s+/)));
+    if (!own || config.autoProcess === false) return; // plain chatter never gets a reply
+    if (own.kind === 'document') {
+      // The main flow: a video sent as a document comes back converted, also as a document.
+      if (isVideoNode(own)) return enqueue(ctx, media, optionsFrom(config, config.defaultMode, text.toLowerCase().split(/\s+/)));
+      return who.isGroup ? undefined : reply(T.notVideo());
     }
-    if (!who.isGroup && text && !cmd) return reply(T.menu(config.prefix));
+    // A normal (WhatsApp-compressed) video: processed on its own only in private chats;
+    // in groups people share videos all the time, so it needs a command there.
+    if (!who.isGroup) return enqueue(ctx, media, optionsFrom(config, config.defaultMode, text.toLowerCase().split(/\s+/)));
   };
 }

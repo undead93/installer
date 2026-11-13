@@ -1,14 +1,14 @@
 // All user-facing bot text (Bahasa Melayu).
 const mb = (n) => `${(n / 1048576).toFixed(1)} MB`;
 
-export function menu(p) {
+export function menu(p, inGroup = false) {
   return [
     '🎬 *TikTok HD Bot*',
     '',
-    'Hantar video sebagai *DOKUMEN* (📎 → Dokumen → pilih video).',
-    'Bot pulangkan fail yang sedia untuk upload TikTok HD.',
+    `Hantar video sebagai *DOKUMEN*${inGroup ? ' dalam group ini' : ''} (📎 → Dokumen → pilih video).`,
+    'Bot balas dengan dokumen yang sudah siap convert untuk TikTok HD.',
     '',
-    '*Arahan* (tulis pada kapsyen, atau reply video):',
+    '*Pilihan* (tulis pada kapsyen dokumen, atau reply video):',
     `• ${p}max — 4K 2160p 30fps (lalai)`,
     `• ${p}hd — 1080p 30fps (lebih laju)`,
     `• ${p}keep — kekal resolusi asal`,
@@ -16,7 +16,7 @@ export function menu(p) {
     `• ${p}status — lihat barisan giliran`,
     `Tambah *60* untuk 60fps, contoh: ${p}max 60`,
     '',
-    '⚠️ Jangan hantar sebagai video biasa — WhatsApp akan mampatkan dan kualiti hilang.',
+    `⚠️ Video biasa (bukan dokumen) sudah dimampat WhatsApp${inGroup ? ` — dalam group, reply video itu dengan *${p}max* kalau tetap mahu proses` : ''}.`,
   ].join('\n');
 }
 

@@ -125,16 +125,25 @@ nombor disekat.
 
 ## 4. Cara guna
 
-Pengguna hantar video kepada bot **sebagai DOKUMEN** (📎 → Dokumen → pilih video).
-Video yang dihantar sebagai "video" biasa sudah dimampat WhatsApp — bot tetap proses tetapi beri amaran.
+Secara lalai bot **layan dalam group sahaja** (`REPLY_IN=group`). Masukkan nombor bot ke dalam group,
+kemudian ahli group hantar video **sebagai DOKUMEN** (📎 → Dokumen → pilih video):
 
 ```
-Anda  ── 📎 Dokumen: IMG_1880.MOV ─────────────────────────▶  Bot
-Bot   ── "⬇️ Memuat turun..." → "⚙️ Encode video ████░░ 40%"   (satu mesej, dikemas kini)
-Bot   ── 📄 Dokumen: IMG_1880_hd.mp4 + ringkasan + cara upload ─▶  Anda
+Ahli  ── 📎 Dokumen: IMG_1880.MOV ─────────────────────────────▶  Group
+Bot   ── "⬇️ Memuat turun..." → "⚙️ Encode video ████░░ 40%"     (satu mesej, dikemas kini)
+Bot   ── 📄 Dokumen: IMG_1880_hd.mp4, quote + @tag pengirim ─────▶  Group
 ```
 
-Tak perlu taip apa-apa — hantar dokumen sahaja sudah cukup (mod `max`).
+Tak perlu taip apa-apa — hantar dokumen sahaja sudah cukup (mod `max`). Dalam group, bot senyap
+untuk sembang biasa, video biasa dan fail bukan video; ia hanya bertindak pada dokumen video dan arahan.
+
+| Tetapan `.env` | Kesan |
+|---|---|
+| `REPLY_IN=group` | group sahaja (lalai) — chat peribadi diabaikan |
+| `REPLY_IN=private` | chat peribadi sahaja |
+| `REPLY_IN=all` | kedua-duanya |
+| `GROUP_IDS=...@g.us` | hadkan kepada group tertentu (hantar `.id` dalam group untuk dapat ID) |
+| `ALLOW_SELF=true` | kalau bot guna nombor anda sendiri: hantar dokumen dengan kapsyen `.max` dari telefon itu |
 
 | Arahan | Fungsi |
 |---|---|
@@ -145,9 +154,11 @@ Tak perlu taip apa-apa — hantar dokumen sahaja sudah cukup (mod `max`).
 | `.max 60` | benarkan 60fps |
 | `.info` | semak video sedia TikTok HD atau tidak (macam "checker" Haze) |
 | `.status` | barisan giliran |
+| `.id` | tunjuk ID group (untuk `GROUP_IDS`) |
 | `.menu` | bantuan |
 
-Arahan boleh ditulis pada kapsyen dokumen, atau *reply* video/dokumen dengan arahan.
+Arahan boleh ditulis pada kapsyen dokumen, atau *reply* video/dokumen dengan arahan
+(contoh: reply video biasa dalam group dengan `.max` untuk tetap proses).
 Bot pulangkan fail sebagai dokumen (supaya WhatsApp tidak mampat semula), dengan langkah upload:
 
 1. Buka dokumen → Kongsi → **Simpan Video** (masuk galeri).
@@ -166,8 +177,8 @@ node src/cli.js compare IMG_1880_haze.mp4 out.mp4 # banding trek demi trek
 
 ### Tetapan `.env`
 
-Lihat `.env.example`. Yang penting: `BOT_NUMBER`, `ALLOWED_NUMBERS` (hadkan pengguna),
-`DEFAULT_MODE`, `X264_PRESET`, `MAX_FILE_MB`, `MAX_DURATION_SEC`, `ENCODER_TAG`.
+Lihat `.env.example`. Yang penting: `BOT_NUMBER`, `REPLY_IN`, `GROUP_IDS`, `ALLOWED_NUMBERS`
+(hadkan pengguna), `DEFAULT_MODE`, `X264_PRESET`, `MAX_FILE_MB`, `MAX_DURATION_SEC`, `ENCODER_TAG`.
 
 ---
 

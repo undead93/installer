@@ -47,13 +47,13 @@ after(() => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('document video in -> converted document out', async () => {
+test('group: document video in -> converted document out', async () => {
   // 1. The user sends IMG_TEST.MOV as a document: WhatsApp encrypts it and the message carries the keys.
   const enc = await encryptedStream({ url: path.join(dir, 'IMG_TEST.MOV') }, 'document', { logger });
   served.set('/in.enc', fs.readFileSync(enc.encFilePath));
   fs.rmSync(enc.encFilePath, { force: true });
   const incoming = {
-    key: { remoteJid: '60123456789@s.whatsapp.net', id: 'USERMSG1', fromMe: false },
+    key: { remoteJid: '120363000000000001@g.us', participant: '201234567890123@lid', participantAlt: '60123456789@s.whatsapp.net', id: 'USERMSG1', fromMe: false },
     messageTimestamp: Math.floor(Date.now() / 1000),
     message: {
       documentWithCaptionMessage: {
@@ -93,7 +93,7 @@ test('document video in -> converted document out', async () => {
   };
 
   const config = {
-    prefix: '.', owners: [], allowed: [], allowGroups: false, autoProcess: true,
+    prefix: '.', owners: [], allowed: [], replyIn: 'group', groupIds: [], allowSelf: true, autoProcess: true,
     defaultMode: 'max', defaultFps: 30, preset: OWN_INPUT ? 'medium' : 'ultrafast', crf: 17,
     maxFileMb: 2048, maxDurationSec: 600, encoderTag: 'TikTok HD Bot',
     workDir: path.join(dir, 'work'),
@@ -111,7 +111,8 @@ test('document video in -> converted document out', async () => {
   assert.ok(docMsg, 'WhatsApp document message generated');
   assert.equal(docMsg.mimetype, 'video/mp4');
   assert.equal(docMsg.fileName, 'IMG_TEST_hd.mp4');
-  assert.match(docMsg.caption, /Siap/);
+  assert.match(docMsg.caption, /^@201234567890123 ✅ \*Siap!\*/);
+  assert.deepEqual(docMsg.contextInfo?.mentionedJid, ['201234567890123@lid'], 'sender is tagged in the group');
   assert.ok(sent.some((s) => s.content.edit && s.message.protocolMessage), 'progress edits are valid edit messages');
 
   // 4. The user downloads the reply: decrypt it like a WhatsApp client and check it is the converted video.
