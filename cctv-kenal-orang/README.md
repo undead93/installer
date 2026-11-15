@@ -64,6 +64,35 @@ Dalam `mula.bat`, tulis semuanya dalam **satu baris**.
 - Untuk kurangkan beban CPU, kenal wajah dari `stream2` dan rakam HD dari `stream1`:
   `--kamera "Pagar=rtsp://.../stream2|rtsp://.../stream1"` (kenal|rakam).
 
+## Guna di Mac: `mula.command` (klik dua kali)
+
+`mula.command` ialah versi Mac untuk `mula.bat`. Ia sediakan semuanya sendiri dan menjalankan sistem.
+
+**1. Pasang alat (sekali sahaja).** Buka Terminal dan pasang [Homebrew](https://brew.sh), kemudian:
+
+    brew install python node
+
+**2. Kali pertama**, klik dua kali `mula.command` dalam Finder. Ia akan:
+- buat fail `tetapan.sh` dan buka dalam TextEdit. Isi nombor WhatsApp dan alamat kamera, kemudian simpan (Cmd+S);
+- klik dua kali `mula.command` sekali lagi. Kali ini ia buat `venv`, pasang pakej Python dan WhatsApp (beberapa minit), dan sistem bermula.
+
+**3. Selepas itu**, klik dua kali `mula.command` sahaja. Untuk berhenti, tekan **Ctrl+C** atau tutup tetingkap Terminal.
+
+- Mac tidak akan tidur selagi sistem berjalan (skrin masih boleh padam).
+- Kalau sistem terhenti kerana ralat, ia dimulakan semula sendiri selepas 10 saat.
+- Untuk tukar kamera atau nombor, edit `tetapan.sh`. Ia mengandungi kata laluan kamera, jadi **jangan kongsi fail itu**.
+- Untuk mula sendiri bila Mac dihidupkan: System Settings > General > Login Items, tekan **+** dan pilih `mula.command`.
+
+**Perkara yang biasa berlaku di Mac:**
+- *"cannot be opened because it is from an unidentified developer"*: klik kanan `mula.command` > **Open** > **Open** (sekali sahaja).
+  Kalau masih tak boleh, jalankan sekali dalam Terminal: `chmod +x mula.command` dan `xattr -d com.apple.quarantine mula.command`
+  (dalam folder `cctv-kenal-orang`), atau jalankan terus dengan `bash mula.command`.
+- *"Terminal would like to find devices on your local network"*: tekan **Allow**. Tanpa ini Mac tak dapat sambung ke kamera.
+  Kalau terlepas, hidupkan semula di System Settings > Privacy & Security > Local Network > Terminal.
+- *"Do you want python to accept incoming network connections?"*: tekan **Allow**, supaya telefon boleh buka page web.
+- Untuk pindah dari Windows, salin folder `orang/`, `whatsapp/auth/` dan fail `tetapan.json` ke folder ini.
+  Salin juga alamat kamera dan nombor dari `mula.bat` ke dalam `tetapan.sh`.
+
 ## Guna di Windows
 
 Sistem ini juga berjalan di Windows 10/11, jadi anda boleh cuba dulu sebelum pindah ke Mac.
