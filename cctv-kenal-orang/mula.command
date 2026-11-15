@@ -14,6 +14,10 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"   # Homebrew (Apple Silicon
 berhenti () { echo; read -r -p "Tekan Enter untuk tutup..." _; exit "${1:-1}"; }
 
 echo "=== CCTV Rumah ==="
+if launchctl print "gui/$(id -u)/com.cctvrumah" >/dev/null 2>&1; then
+  echo "Sistem sudah berjalan di latar belakang (latar.command)."
+  echo "Untuk jalankan dalam Terminal, matikan dahulu: klik dua kali latar.command."; berhenti 0
+fi
 
 # --- tetapan ---
 if [ ! -f tetapan.sh ]; then

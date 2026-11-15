@@ -85,6 +85,17 @@ Guna Python **3.12**. Python terbaru dari `brew install python` mungkin terlalu 
 - Untuk tukar kamera atau nombor, edit `tetapan.sh`. Ia mengandungi kata laluan kamera, jadi **jangan kongsi fail itu**.
 - Untuk mula sendiri bila Mac dihidupkan: System Settings > General > Login Items, tekan **+** dan pilih `mula.command`.
 
+**Jalan di latar belakang (tanpa tetingkap Terminal):** selepas `mula.command` berjaya sekali (pakej dipasang,
+QR WhatsApp diimbas), hentikannya dengan Control+C dan klik dua kali **`latar.command`**.
+- Sistem berjalan di latar belakang, dan **mula sendiri setiap kali Mac dihidupkan** (selepas login).
+  Kalau sistem terhenti kerana ralat, macOS memulakannya semula.
+- Klik dua kali `latar.command` sekali lagi untuk **matikan**.
+- Log sistem: `log/latar.log`. Tengok langsung dalam Terminal: `tail -f ~/cctv-kenal-orang/log/latar.log`.
+- Letak folder dalam folder **Home** (Cmd+Shift+H), bukan Desktop/Documents/Downloads, kerana macOS mungkin menyekat
+  perkhidmatan latar belakang daripada membaca fail di situ.
+- Supaya sistem hidup semula sendiri selepas elektrik terputus: System Settings > Energy > **Start up automatically after
+  a power failure**, dan System Settings > Users & Groups > **Automatically log in as** (pilih akaun anda).
+
 **Perkara yang biasa berlaku di Mac:**
 - *"cannot be opened because it is from an unidentified developer"*: klik kanan `mula.command` > **Open** > **Open** (sekali sahaja).
   Kalau masih tak boleh, jalankan sekali dalam Terminal: `chmod +x mula.command` dan `xattr -d com.apple.quarantine mula.command`
