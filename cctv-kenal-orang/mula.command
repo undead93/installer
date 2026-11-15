@@ -32,13 +32,18 @@ if grep -q "namapengguna:katalaluan" tetapan.sh; then
 fi
 
 # --- Python ---
-PY=python3
+# Python terlalu baru (3.14+) belum ada pakej onnxruntime/opencv, jadi utamakan 3.12 / 3.13 / 3.11
 if [ ! -x venv/bin/python ]; then
-  if ! command -v python3 >/dev/null; then
-    echo "Python 3 belum dipasang. Pasang dari python.org atau: brew install python"; berhenti
+  PY=""
+  for v in python3.12 python3.13 python3.11 python3.10; do
+    if command -v "$v" >/dev/null; then PY="$v"; break; fi
+  done
+  if [ -z "$PY" ]; then
+    echo "Perlukan Python 3.12. Buka Terminal dan jalankan:  brew install python@3.12"
+    echo "kemudian klik dua kali mula.command sekali lagi."; berhenti
   fi
-  echo "Kali pertama: sediakan Python (venv) dan pasang pakej..."
-  python3 -m venv venv || { echo "Gagal buat venv"; berhenti; }
+  echo "Kali pertama: sediakan Python ($("$PY" --version)) dan pasang pakej..."
+  "$PY" -m venv venv || { echo "Gagal buat venv"; berhenti; }
   venv/bin/python -m pip install --upgrade pip -q
   venv/bin/python -m pip install -r requirements.txt || { rm -rf venv; echo "Gagal pasang pakej Python"; berhenti; }
 fi

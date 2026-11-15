@@ -70,7 +70,9 @@ Dalam `mula.bat`, tulis semuanya dalam **satu baris**.
 
 **1. Pasang alat (sekali sahaja).** Buka Terminal dan pasang [Homebrew](https://brew.sh), kemudian:
 
-    brew install python node
+    brew install python@3.12 node
+
+Guna Python **3.12**. Python terbaru dari `brew install python` mungkin terlalu baru untuk pakej `onnxruntime`.
 
 **2. Kali pertama**, klik dua kali `mula.command` dalam Finder. Ia akan:
 - buat fail `tetapan.sh` dan buka dalam TextEdit. Isi nombor WhatsApp dan alamat kamera, kemudian simpan (Cmd+S);
